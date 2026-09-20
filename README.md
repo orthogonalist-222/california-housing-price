@@ -31,6 +31,7 @@ uv run pytest -q
 uv run python tools/check_layout.py
 uv run python -m calhousing.eda        # seven figures -> artifacts/eda/
 uv run python tools/measure_leakage.py # what leakage costs, measured
+uv run python -m calhousing.train --model lgbm --n-iter 25
 ```
 
 Raw data is never tracked; fetch it with:

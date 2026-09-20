@@ -26,6 +26,12 @@ dependencies = [
     "matplotlib>=3.8,<4.0",
     "seaborn>=0.13,<0.14",
     "joblib>=1.3,<2.0",
+    # Gradient boosting libraries, added in M3-S3. Bounds chosen to overlap
+    # Kaggle's notebook image rather than to track the newest release: the
+    # kernel's fallback install path resolves no dependencies at all, so a
+    # version this project needs but Kaggle lacks is a published traceback.
+    "xgboost>=2.0,<4.0",
+    "lightgbm>=4.0,<5.0",
 ]
 
 [project.urls]

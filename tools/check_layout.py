@@ -20,6 +20,7 @@ Run with::
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -95,6 +96,16 @@ DECLARED: list[tuple[str, str]] = [
     ("kaggle/src_dataset/dataset-metadata.json", "M4-S2"),
     ("kaggle/kernel/kernel-metadata.json", "M4-S2"),
     ("tests/test_packaging.py", "M4-S2"),
+    # --- M4-S3: evidence, model card, publish -------------------------------
+    #
+    # docs/evidence/ is the ONE exception to "artifacts are cattle": the
+    # one-shot test-set record cannot be regenerated without scoring the test
+    # set again, which is the failure ADR-003 exists to prevent.
+    ("docs/evidence/README.md", "M4-S3"),
+    ("docs/evidence/test-set-evaluation.json", "M4-S3"),
+    ("docs/evidence/headline.csv", "M4-S3"),
+    ("docs/evidence/*.png", "M4-S3"),
+    ("docs/model-card.md", "M4-S3"),
 ]
 
 #: Paths that must never be tracked, with the reason the gate gives when it
@@ -172,9 +183,34 @@ def classify(paths: list[str]) -> tuple[list[tuple[str, str]], list[str]]:
     return forbidden, undeclared
 
 
+def missing(paths: list[str]) -> list[tuple[str, str]]:
+    """Declared, non-glob paths that git is **not** tracking.
+
+    Added in M4-S3, after the gap let a real defect through (F-007).
+
+    The gate enforced one direction only - *tracked implies declared* - so a
+    declared path that was never committed passed silently. That is exactly
+    what happened: ``uv build`` writes a ``.gitignore`` containing ``*`` into
+    its output directory, the output directory was the tracked
+    ``kaggle/src_dataset/``, and so ``dataset-metadata.json`` was invisible to
+    git. It existed on the machine that wrote it, the gate said "all declared",
+    and CI failed on a runner that had only what was committed.
+
+    Glob entries are skipped: ``docs/field-notes/*.md`` says *these are
+    allowed*, not *at least one must exist*.
+    """
+    tracked = set(paths)
+    return [
+        (glob, story)
+        for glob, story in DECLARED
+        if "*" not in glob and glob not in tracked
+    ]
+
+
 def main() -> int:
     paths = tracked_files()
     forbidden, undeclared = classify(paths)
+    absent = missing(paths)
 
     for path, why in forbidden:
         print(f"FORBIDDEN TRACKED PATH: {path}\n    {why}", file=sys.stderr)
@@ -186,16 +222,27 @@ def main() -> int:
             "    entry and the matching line to the tree in README.md.",
             file=sys.stderr,
         )
+    for path, story in absent:
+        exists = "exists on disk but is NOT tracked" if os.path.exists(path) else "does not exist"
+        print(
+            f"DECLARED BUT NOT TRACKED: {path}  ({story})\n"
+            f"    It {exists}.\n"
+            "    A declared path that was never committed passes every check on\n"
+            "    the machine that wrote it and fails on every other one. If it is\n"
+            "    ignored, find out why: `git check-ignore -v <path>`.",
+            file=sys.stderr,
+        )
 
-    if forbidden or undeclared:
+    if forbidden or undeclared or absent:
         print(
             f"\nlayout gate FAILED: {len(forbidden)} forbidden, "
-            f"{len(undeclared)} undeclared, out of {len(paths)} tracked files.",
+            f"{len(undeclared)} undeclared, {len(absent)} declared-but-untracked, "
+            f"out of {len(paths)} tracked files.",
             file=sys.stderr,
         )
         return 1
 
-    print(f"layout gate OK: {len(paths)} tracked files, all declared.")
+    print(f"layout gate OK: {len(paths)} tracked files, all declared and present.")
     return 0
 
 

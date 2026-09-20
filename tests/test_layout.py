@@ -79,6 +79,38 @@ def test_forbidden_beats_declared() -> None:
         check_layout._DECLARED_RE.pop()
 
 
+def test_a_declared_path_that_is_not_tracked_is_refused() -> None:
+    """Red-team the direction the gate used to be blind in (F-007).
+
+    The gate enforced *tracked implies declared* only. A declared path that was
+    never committed passed on the machine that wrote it and failed on every
+    other one - which is exactly how `kaggle/src_dataset/dataset-metadata.json`
+    reached main uncommitted and broke CI.
+    """
+    tracked = [glob for glob, _ in check_layout.DECLARED if "*" not in glob]
+    assert check_layout.missing(tracked) == []
+
+    without_one = [p for p in tracked if p != "pyproject.toml"]
+    absent = check_layout.missing(without_one)
+    assert ("pyproject.toml", "M1-S1") in absent
+
+
+def test_glob_entries_are_not_required_to_exist() -> None:
+    """``docs/field-notes/*.md`` says *these are allowed*, not *at least one
+    must exist*. Requiring globs would make the gate refuse an empty repo."""
+    assert all("*" not in glob for glob, _ in check_layout.missing([]))
+
+
+def test_the_three_failure_modes_have_three_different_messages() -> None:
+    """A gate whose refusals all read alike is a debugging tax."""
+    import io
+    import contextlib
+
+    forbidden, undeclared = check_layout.classify(["kaggle.json", "src/calhousing/x.py"])
+    assert forbidden and undeclared
+    assert check_layout.missing([]) != []
+
+
 def test_gate_passes_on_the_real_tree() -> None:
     """The actual repo, right now, is fully declared."""
     repo = Path(__file__).resolve().parents[1]

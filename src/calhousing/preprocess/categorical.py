@@ -74,6 +74,8 @@ will happily use the noise.
 
 from __future__ import annotations
 
+import inspect
+
 import numpy as np
 from sklearn.base import BaseEstimator
 from sklearn.impute import SimpleImputer
@@ -183,6 +185,31 @@ def make_onehot_encoder(
     )
 
 
+def _quantile_method_kwarg() -> dict[str, str]:
+    """``quantile_method="averaged_inverted_cdf"`` — only where it exists.
+
+    Pinning it is deliberate: scikit-learn 1.9 changes the default, and a
+    silent change to the bin edges would move every downstream number with no
+    diff to point at.
+
+    But the parameter arrived in **1.7**, and this project declares
+    ``scikit-learn>=1.5``. Kaggle's image sits below 1.7, so `pip` was already
+    satisfied, installed nothing newer, and the published kernel died with::
+
+        TypeError: KBinsDiscretizer.__init__() got an unexpected keyword
+        argument 'quantile_method'
+
+    Feature-detection rather than a version comparison: the question is whether
+    this build accepts the argument, and the signature answers it directly.
+
+    Behaviour is unchanged on older versions - below 1.7 the only behaviour is
+    the one this value names.
+    """
+    if "quantile_method" in inspect.signature(KBinsDiscretizer.__init__).parameters:
+        return {"quantile_method": "averaged_inverted_cdf"}
+    return {}
+
+
 def build_categorical_block(
     *,
     encoder: str = "onehot",
@@ -250,10 +277,7 @@ def build_binned_block(
                     strategy=strategy,
                     subsample=None,
                     random_state=seed,
-                    # Pinned rather than inherited: scikit-learn 1.9 changes
-                    # this default, and a silent change to the bin edges would
-                    # move every downstream number with no diff to point at.
-                    quantile_method="averaged_inverted_cdf",
+                    **_quantile_method_kwarg(),
                 ),
             ),
         ]

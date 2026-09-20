@@ -859,3 +859,49 @@ prints `--public` in its create command so this cannot happen twice.
 a string containing `ERROR`, so it did not stop on the terminal state and ran
 until its timeout. Same shape as F-009 - a filter that does not cover the
 failure path, where silence looks exactly like "still running".
+
+### RT-026 - three kernel failures, three different causes (2026-09-21)
+
+The acceptance check "the kernel runs green" failed three times. Recording all
+three together, because the sequence is the lesson.
+
+| # | Failed at | Cause | Fix |
+| --- | --- | --- | --- |
+| 1 | first data cell | mount path hardcoded to one slug (F-010) | search by filename |
+| 2 | first data cell | search only went two levels deep; real mount is `/kaggle/input/datasets/...` (F-011) | `rglob` |
+| 3 | cell 10 | `quantile_method` needs sklearn 1.7; Kaggle is below it, pip was satisfied and upgraded nothing (F-012) | feature-detect the kwarg |
+
+**Each fix moved the failure forward**, which is how the run was progressing
+rather than stuck - by #3 the log read:
+
+```
+[calhousing] read /kaggle/input/datasets/camnugent/california-housing-prices/housing.csv  ->  20,640 rows x 10 columns
+```
+
+**The diagnostic added in #1 is what made #2 a one-line diagnosis** rather than
+another blind attempt: `contains: ['datasets']`. That single word located it.
+
+**The systemic finding is #3, and it is the one worth keeping.** CI ran on
+Python 3.11 and 3.12 but always resolved the NEWEST dependency versions in
+range. `pyproject` declares `scikit-learn>=1.5`; every test passed on 1.7.2
+while the code used a 1.7-only argument. The declared floor was fiction, and
+the place we found out was a published kernel.
+
+A `lowest-versions` job now resolves `--resolution lowest-direct` and runs the
+whole suite against it:
+
+```
+FLOOR: sklearn 1.5.0 | pandas 2.2.0 | numpy 1.26.0 | lgbm 4.0.0 | xgb 2.0.0
+```
+
+**Verified both halves.** On that floor, the old code raises
+`TypeError: KBinsDiscretizer.__init__() got an unexpected keyword argument
+'quantile_method'` - so the job would have caught this before publishing - and
+the new code builds and passes all 273 tests.
+
+**One trap inside the fix itself:** `uv run` silently re-resolves to the
+HIGHEST versions unless given `--no-sync`. A first draft of the job would have
+tested the ceiling while its own comment claimed it tested the floor - exactly
+the class of defect it exists to catch, inside the guard against it. Caught by
+running it locally and reading the printed versions rather than trusting the
+step name.

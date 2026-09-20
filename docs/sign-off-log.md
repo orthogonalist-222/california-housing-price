@@ -30,6 +30,10 @@ Roles in this project: `data scientist`, `ML engineer`, `tech lead`,
 | 2026-09-20 | M2-S2 | Layout gate | data scientist | data scientist | PASS | `layout gate OK: 32 tracked files, all declared.` |
 | 2026-09-20 | M2-S2 | Unseen-category handling, **red-team** | data scientist | data scientist | PASS | See RT-008 below |
 | 2026-09-20 | M2-S2 | `drop='first'` collision, **red-team** | data scientist | data scientist | PASS | See RT-009 below |
+| 2026-09-20 | M2-S3 | `uv run pytest -q` | data scientist | data scientist | PASS | 134 passed |
+| 2026-09-20 | M2-S3 | Layout gate | data scientist | data scientist | PASS | `layout gate OK: 36 tracked files, all declared.` |
+| 2026-09-20 | M2-S3 | Centroids are train-only | data scientist | data scientist | PASS | See RT-010 below |
+| 2026-09-20 | M2-S3 | Zero-denominator guard | data scientist | data scientist | PASS | See RT-011 below |
 
 ## Red-team records
 
@@ -253,3 +257,33 @@ should be deleted.
 **Noted asymmetry:** scikit-learn warns about unknown categories **only when
 `drop` is set**. The safe configuration is silent and the unsafe one is loud, so
 warnings cannot be relied on to surface this.
+
+### RT-010 - ClusterSimilarity centroids come from train only (2026-09-20)
+
+**Control.** Fit on 400 rows, record the centroids, transform the held-out rows
+and then the whole frame. `np.testing.assert_array_equal` on the centroids
+before and after: unchanged.
+
+**Vacuity check, run as its own test.** Fitting on train+test must produce
+DIFFERENT centroids from fitting on train alone - otherwise the control above
+detects nothing and is quietly worthless. `test_fitting_on_everything_moves_the_centroids`
+asserts they differ.
+
+This pairing is now the house pattern for every leakage test in the repo
+(see also RT-007): a control, plus a test that the control is capable of
+failing.
+
+### RT-011 - the zero-denominator guard, with honest provenance (2026-09-20)
+
+**The dataset does not motivate this guard.** Measured on the raw file:
+`households == 0` in 0 rows, `total_rooms == 0` in 0 rows. The guard exists to
+avoid depending on a property of one CSV, not to fix an observed defect, and
+the test says so in its own docstring rather than implying otherwise.
+
+**Planted defect:** synthetic rows with a zero `households` and a zero
+`total_rooms`. Observed: every ratio finite, the affected cells equal to the
+declared fill rather than `inf`.
+
+**The other half:** `test_the_unguarded_division_really_does_produce_inf`
+asserts plain division still yields `inf` here. If it ever stopped,
+`safe_divide` would be unnecessary and should be deleted.

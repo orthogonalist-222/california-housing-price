@@ -35,7 +35,11 @@ def make_housing(
     """
     rng = np.random.default_rng(seed)
 
-    households = rng.integers(20, 3000, n).astype(float)
+    # Log-normal, not uniform. The real file's count columns have skew 3.4-4.9
+    # (measured in M1-S3), and a uniform draw reproduces the column NAMES while
+    # losing the property those columns exist to exercise - which is how a
+    # de-skew test came to fail against a fixture that was never skewed.
+    households = np.clip(rng.lognormal(5.6, 0.85, n), 5.0, 6000.0)
     rooms = households * rng.uniform(3.0, 9.0, n)
     frame = pd.DataFrame(
         {

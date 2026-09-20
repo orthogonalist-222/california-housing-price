@@ -51,6 +51,26 @@ kaggle datasets download -d camnugent/california-housing-prices -p data/raw --un
 - **The layout gate is a CI job, not a hook.** A file added and committed
   without a `DECLARED` entry passes locally and fails on the PR. Run
   `uv run python tools/check_layout.py` before pushing.
+- **`git push` used the wrong GitHub account, and said so only as a 403.**
+  Git Credential Manager is configured system-wide
+  (`C:/Program Files/Git/etc/gitconfig`) and handed out `loadbearingcode-222`
+  while `gh`'s active account was `orthogonalist-222`:
+  `Permission to orthogonalist-222/... denied to loadbearingcode-222`. Three
+  accounts are logged into `gh` on this machine, so the symptom reads as a
+  permissions problem on the repo rather than an identity mix-up. Fixed
+  **repo-locally** so the machine-wide setting is untouched:
+
+  ```
+  git config --local credential.helper ""
+  git config --local --add credential.helper "!gh auth git-credential"
+  ```
+
+  Ten-second check: `gh api user --jq .login` vs the name in the 403.
+  Undo: `git config --local --unset-all credential.helper`.
+- **`git add -A --renormalize .` does not stage new files.** `--renormalize`
+  only revisits paths git already tracks, so a freshly written field note was
+  silently left out of a commit that otherwise looked complete. Use a plain
+  `git add -A`, then read `git status --short` for `??` lines.
 
 ## Ledgers
 

@@ -56,6 +56,11 @@ Roles in this project: `data scientist`, `ML engineer`, `tech lead`,
 | 2026-09-20 | M3-S4 | **The one-shot test-set run** | data scientist | data scientist | **PASS** | Five arms, one invocation, seed 42 - see RT-019. Record: `artifacts/final/test-set-evaluation.json` |
 | 2026-09-20 | M3-S4 | One-shot guard, **red-team** | data scientist | data scientist | PASS | Second run refused with exit 2, record unchanged; `--rerun` still works |
 | 2026-09-20 | **M3** | **Milestone gate** | data scientist | data scientist | **PASS** | All four stories observed; F-001..F-006 closed, no open S1/S2. Release `v0.3.0`. |
+| 2026-09-20 | M4-S1 | `uv run pytest -q` | ML engineer | ML engineer | PASS | 251 passed |
+| 2026-09-20 | M4-S1 | Layout gate | ML engineer | ML engineer | PASS | `layout gate OK: 60 tracked files, all declared.` |
+| 2026-09-20 | M4-S1 | Notebook builds reproducibly | ML engineer | ML engineer | PASS | 37 cells; two builds byte-identical |
+| 2026-09-20 | M4-S1 | Notebook **runs** end to end | ML engineer | ML engineer | PASS | 16 code cells in 124s - see RT-020 |
+| 2026-09-20 | M4-S1 | Staleness gate, **red-team** | ML engineer | ML engineer | PASS | See RT-021, including a failed first attempt |
 
 ## Red-team records
 
@@ -626,3 +631,62 @@ original record is UNCHANGED afterwards - a guard that refuses and then
 corrupts what it protects is not a guard. `--rerun` exists deliberately: a
 guard with no escape hatch gets worked around by deleting the file, which
 leaves no trace, whereas `--rerun` is explicit and greppable.
+
+### RT-020 - the notebook runs, and what running it found (2026-09-20)
+
+Building is not running. `tools/build_notebook.py` compiles every cell, so a
+syntax error cannot ship - but compiling proves nothing about a `KeyError` on
+cell 14. `tools/run_notebook.py` executes the real file in order.
+
+**Result:** 16 code cells, **124 seconds**, no failures.
+
+**It found a defect in itself first.** `run_notebook.py` skipped the install
+cell by searching sources for the substring `"pip"` - which also matches
+**`tuned_pipeline`** in the IMPORTS cell. The imports were skipped and the
+notebook died three cells later on `NameError: name 'load_raw' is not defined`,
+pointing at a cell that was completely fine.
+
+Fixed with an explicit marker, `# tag:install`, matched exactly. The script now
+REFUSES if it does not find exactly one tagged cell - silently skipping zero or
+two is the same class of failure in a different hat. Pinned by
+`test_there_is_exactly_one_tagged_install_cell` and
+`test_the_tag_does_not_match_the_imports_cell`.
+
+Also confirmed separately: the package installs cleanly from GitHub into a
+fresh 3.11 venv, which is the path the notebook's install cell takes on Kaggle.
+
+### RT-021 - the staleness gate, and a red-team that was wrong first (2026-09-20)
+
+**First attempt failed to prove anything, and looked like a pass.** Sequence
+was: hand-edit the notebook, run `build_notebook.py`, check `git diff`. Result:
+"GATE FAILED TO NOTICE".
+
+The gate was fine. The red-team was backwards - the build REGENERATES the file,
+so it overwrote the planted edit before anything inspected it. What that
+actually tested was that the generator is deterministic, which was already
+known.
+
+**Lesson worth more than the gate: a red-team that runs the repair before the
+check proves nothing, and is indistinguishable from a passing test.**
+
+**Correct sequence** - plant, then check BEFORE rebuilding:
+
+```
+FAILED tests/test_notebook_build.py::test_the_committed_notebook_matches_its_generator
+E   At index 113 diff: b'H' != b'C'
+```
+
+`H` from "Hand-edited", `C` from "California". Restored afterwards; the gate
+passes again.
+
+**Supporting properties, each tested:** stable content-hashed cell ids (random
+ids would fail the gate on every run and train everyone to ignore it), no
+committed outputs or execution counts, and every code cell in the shipped
+artefact compiles.
+
+**One more guard worth naming.**
+`test_the_negative_results_survive_into_the_notebook` asserts the notebook
+still contains each finding that contradicted the plan - the -0.135% leak, "no
+ensemble is better than any other", the stacking verdict, the whitelist, and
+`housing_median_age`. They are the most deletable content in the project and
+the most valuable.

@@ -85,6 +85,11 @@ DECLARED: list[tuple[str, str]] = [
     ("src/calhousing/interpret.py", "M3-S4"),
     ("tools/final_evaluation.py", "M3-S4"),
     ("tests/test_interpret.py", "M3-S4"),
+    # --- M4-S1: the notebook is a build output ------------------------------
+    ("tools/build_notebook.py", "M4-S1"),
+    ("tools/run_notebook.py", "M4-S1"),
+    ("notebooks/california-housing-sklearn-pipeline.ipynb", "M4-S1"),
+    ("tests/test_notebook_build.py", "M4-S1"),
 ]
 
 #: Paths that must never be tracked, with the reason the gate gives when it

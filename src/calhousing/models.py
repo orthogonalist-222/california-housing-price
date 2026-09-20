@@ -18,6 +18,7 @@ import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator, clone
 from sklearn.dummy import DummyRegressor
+from sklearn.ensemble import HistGradientBoostingRegressor, RandomForestRegressor
 from sklearn.linear_model import LinearRegression, Ridge
 from sklearn.model_selection import KFold, cross_validate
 
@@ -73,6 +74,17 @@ def _ridge() -> BaseEstimator:
     return Ridge(alpha=1.0)
 
 
+def _random_forest() -> BaseEstimator:
+    # n_jobs=1 on the estimator: the SEARCH parallelises across draws, and
+    # nesting a thread pool inside a process pool oversubscribes the machine
+    # and is reliably slower than either alone.
+    return RandomForestRegressor(random_state=config.RANDOM_SEED, n_jobs=1)
+
+
+def _hist_gradient_boosting() -> BaseEstimator:
+    return HistGradientBoostingRegressor(random_state=config.RANDOM_SEED)
+
+
 #: Every model this project knows about. M3-S2 and M3-S3 add to it; nothing
 #: else creates estimators.
 REGISTRY: dict[str, ModelSpec] = {
@@ -104,6 +116,39 @@ REGISTRY: dict[str, ModelSpec] = {
         ),
         search_space={"model__alpha": [0.01, 0.1, 1.0, 10.0, 100.0]},
         cost="fast",
+    ),
+    "rf": ModelSpec(
+        name="rf",
+        factory=_random_forest,
+        why=(
+            "Bagged trees. Invents the interactions a linear model cannot, and "
+            "is indifferent to the scaling and de-skewing - which makes it the "
+            "arm that shows how much of the pipeline the LINEAR model needed."
+        ),
+        search_space={
+            "model__n_estimators": [100, 200, 300],
+            "model__max_depth": [None, 10, 20, 30],
+            "model__min_samples_leaf": [1, 2, 4, 8],
+            "model__max_features": [0.3, 0.5, 0.7, 1.0],
+        },
+        cost="slow",
+    ),
+    "hgb": ModelSpec(
+        name="hgb",
+        factory=_hist_gradient_boosting,
+        why=(
+            "Histogram gradient boosting - the strongest thing in scikit-learn "
+            "itself on tabular data of this size, and fast enough to search "
+            "properly inside a Kaggle kernel budget."
+        ),
+        search_space={
+            "model__learning_rate": [0.03, 0.05, 0.1, 0.2],
+            "model__max_iter": [200, 400, 600],
+            "model__max_leaf_nodes": [15, 31, 63, 127],
+            "model__min_samples_leaf": [5, 10, 20, 40],
+            "model__l2_regularization": [0.0, 0.1, 1.0],
+        },
+        cost="medium",
     ),
 }
 

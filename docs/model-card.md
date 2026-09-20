@@ -1,6 +1,7 @@
 # Model card — California housing price, LightGBM pipeline
 
-- **Version:** v1.0.0
+- **Version:** v1.0.1
+- **Published kernel:** <https://www.kaggle.com/code/duonghongphu/california-housing-sklearn-pipeline>
 - **Date:** 2026-09-20
 - **Owner:** data scientist (see `docs/sign-off-log.md` for every gate crossing)
 
@@ -146,3 +147,11 @@ one-shot check. Read `docs/evidence/test-set-evaluation.json` instead.
 nothing but committed code, reproduced every headline number to the decimal —
 `lgbm 42251.1`, `stack 42622.5`, `rf 43176.6`, `ridge 65141.6`,
 `dummy 119749.8`.
+
+**On Kaggle, 2026-09-21:** the published kernel runs green and reproduces four
+of the five arms exactly. The **stack** differs — 42,535.4 there against
+42,622.5 here, 0.2%. `StackingRegressor` fits a meta-learner on internally
+cross-validated predictions from four base learners, so it accumulates more
+library-version sensitivity than any single estimator, and Kaggle's
+scikit-learn is a different minor version. The conclusion is unchanged on both:
+the stack is worse than its best member.

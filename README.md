@@ -18,6 +18,8 @@ measurements contradicted the plan they came from. Those are kept.
 | Tests | 269, on Python 3.11 and 3.12 |
 | Test set scored | **once** ([ADR-003](docs/adr/ADR-003-cv-and-test-protocol.md)) |
 
+**Published notebook:** <https://www.kaggle.com/code/duonghongphu/california-housing-sklearn-pipeline>
+
 Full record: [`docs/evidence/`](docs/evidence/) ·
 Caveats that matter: [`docs/model-card.md`](docs/model-card.md)
 

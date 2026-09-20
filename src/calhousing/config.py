@@ -105,9 +105,14 @@ def _kaggle_candidates() -> list[Path]:
     """
     if not KAGGLE_INPUT.is_dir():
         return []
-    return sorted(KAGGLE_INPUT.glob(f"*/{CSV_NAME}")) + sorted(
-        KAGGLE_INPUT.glob(f"*/*/{CSV_NAME}")
-    )
+    # Recursive, not one-or-two levels deep. The first fix globbed `*/` and
+    # `*/*/` and STILL missed it: the real mount was
+    # `/kaggle/input/datasets/...`, deeper than either pattern reached. Guessing
+    # the depth is the same mistake as guessing the slug, one layer up.
+    #
+    # `/kaggle/input` holds attached datasets and nothing else, so an
+    # exhaustive walk is cheap and cannot miss.
+    return sorted(KAGGLE_INPUT.rglob(CSV_NAME))
 
 
 class DataNotFoundError(FileNotFoundError):
@@ -154,9 +159,16 @@ def resolve_csv(explicit: str | os.PathLike[str] | None = None) -> Path:
     # paths it wanted and left the reader to guess what was actually attached -
     # which is how F-010 reached a published kernel.
     if KAGGLE_INPUT.is_dir():
-        mounted = sorted(p.name for p in KAGGLE_INPUT.iterdir())
-        lines.append(f"    {KAGGLE_INPUT} contains: {mounted or '(empty)'}")
-        lines.append("    Attach the camnugent/california-housing-prices dataset.")
+        # Every CSV that IS there, with its full path. Listing only the top
+        # level said `contains: ['datasets']`, which was true, unhelpful, and
+        # cost a second failed kernel run.
+        found = sorted(str(p) for p in KAGGLE_INPUT.rglob("*.csv"))[:20]
+        lines.append(f"    {KAGGLE_INPUT} holds these CSVs: {found or '(none)'}")
+        lines.append(
+            f"    None is named {CSV_NAME}. Attach the "
+            "camnugent/california-housing-prices dataset, or point "
+            f"{CSV_ENV_VAR} at whichever of the above is the raw file."
+        )
     else:
         lines.append("Fetch it with:")
         lines.append(

@@ -12,9 +12,17 @@ when it is absent rather than failing.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
+
+# `tools/` holds runnable scripts, not a package. Putting it on the path here
+# means the gates in it (the layout check, the one-shot guard) can be tested
+# like anything else - a script nobody can import is a script nobody tests.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from calhousing import config
 

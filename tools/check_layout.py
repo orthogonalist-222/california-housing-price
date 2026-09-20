@@ -81,6 +81,10 @@ DECLARED: list[tuple[str, str]] = [
     ("tests/test_train.py", "M3-S2"),
     # --- M3-S3: gradient boosting libraries ---------------------------------
     ("tests/test_models.py", "M3-S3"),
+    # --- M3-S4: stacking, the one-shot run, interpretation ------------------
+    ("src/calhousing/interpret.py", "M3-S4"),
+    ("tools/final_evaluation.py", "M3-S4"),
+    ("tests/test_interpret.py", "M3-S4"),
 ]
 
 #: Paths that must never be tracked, with the reason the gate gives when it

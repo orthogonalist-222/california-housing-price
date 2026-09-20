@@ -34,21 +34,36 @@ DATASET_DIR = REPO / "kaggle" / "src_dataset"
 KERNEL_DIR = REPO / "kaggle" / "kernel"
 NOTEBOOK = REPO / "notebooks" / "california-housing-sklearn-pipeline.ipynb"
 
+#: Where the wheel is BUILT, which is not where it is staged.
+#:
+#: `uv build` writes a `.gitignore` containing `*` into its output directory.
+#: Building straight into `kaggle/src_dataset/` therefore made git ignore that
+#: whole directory - including the tracked `dataset-metadata.json`, which was
+#: then silently never committed and failed CI on a machine that did not have
+#: the untracked copy (F-007).
+#:
+#: So the build goes to `artifacts/`, which is already ignored and where a
+#: stray ignore file is harmless, and only the wheel is copied across.
+BUILD_DIR = REPO / "artifacts" / "wheel"
+
 
 def build_wheel(out: Path) -> Path:
-    """Build a wheel of the package into ``out``.
+    """Build a wheel and place it in ``out``.
 
     A wheel rather than a source zip: the kernel installs it with `--no-index`,
     and a source distribution would need a build backend that the offline
     runner does not have. `uv build` uses the `uv_build` backend declared in
     `pyproject.toml`.
+
+    The build happens in ``BUILD_DIR`` and the wheel is copied across. It is
+    never built in place - see the note on ``BUILD_DIR``.
     """
-    out.mkdir(parents=True, exist_ok=True)
-    for stale in out.glob("*.whl"):
+    BUILD_DIR.mkdir(parents=True, exist_ok=True)
+    for stale in BUILD_DIR.glob("*.whl"):
         stale.unlink()
 
     result = subprocess.run(
-        ["uv", "build", "--wheel", "--out-dir", str(out)],
+        ["uv", "build", "--wheel", "--out-dir", str(BUILD_DIR)],
         cwd=REPO,
         capture_output=True,
         text=True,
@@ -56,10 +71,16 @@ def build_wheel(out: Path) -> Path:
     if result.returncode != 0:
         raise SystemExit(f"wheel build failed:\n{result.stdout}\n{result.stderr}")
 
-    wheels = sorted(out.glob("*.whl"))
-    if len(wheels) != 1:
-        raise SystemExit(f"expected exactly one wheel in {out}, found {len(wheels)}")
-    return wheels[0]
+    built = sorted(BUILD_DIR.glob("*.whl"))
+    if len(built) != 1:
+        raise SystemExit(f"expected exactly one wheel in {BUILD_DIR}, found {len(built)}")
+
+    out.mkdir(parents=True, exist_ok=True)
+    for stale in out.glob("*.whl"):
+        stale.unlink()
+    target = out / built[0].name
+    shutil.copy2(built[0], target)
+    return target
 
 
 def stage_kernel() -> Path:

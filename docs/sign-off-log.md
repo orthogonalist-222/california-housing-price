@@ -61,6 +61,10 @@ Roles in this project: `data scientist`, `ML engineer`, `tech lead`,
 | 2026-09-20 | M4-S1 | Notebook builds reproducibly | ML engineer | ML engineer | PASS | 37 cells; two builds byte-identical |
 | 2026-09-20 | M4-S1 | Notebook **runs** end to end | ML engineer | ML engineer | PASS | 16 code cells in 124s - see RT-020 |
 | 2026-09-20 | M4-S1 | Staleness gate, **red-team** | ML engineer | ML engineer | PASS | See RT-021, including a failed first attempt |
+| 2026-09-20 | M4-S2 | `uv run pytest -q` | ML engineer | ML engineer | PASS | 266 passed |
+| 2026-09-20 | M4-S2 | Layout gate | ML engineer | ML engineer | PASS | `layout gate OK: 65 tracked files, all declared.` |
+| 2026-09-20 | M4-S2 | **Both install paths exercised** | ML engineer | ML engineer | PASS | See RT-022 - each installed into a clean venv |
+| 2026-09-20 | M4-S2 | Staging refuses broken wiring, never uploads | ML engineer | ML engineer | PASS | See RT-023 |
 
 ## Red-team records
 
@@ -690,3 +694,70 @@ still contains each finding that contradicted the plan - the -0.135% leak, "no
 ensemble is better than any other", the stacking verdict, the whitelist, and
 `housing_median_age`. They are the most deletable content in the project and
 the most valuable.
+
+### RT-022 - both install paths, installed rather than asserted (2026-09-20)
+
+"The fallback works" is the easiest sentence in this project to write and the
+easiest to be wrong about. Both were run.
+
+| Path | Verification |
+| --- | --- |
+| GitHub | `uv pip install git+https://...` into a FRESH 3.11 venv; imported `calhousing`, `TUNED`, `build_pipeline` |
+| Offline wheel | Fresh 3.11 venv with only the RUNTIME deps preinstalled (Kaggle's shape), then `pip install --no-index --find-links <dir> <wheel>` with NO network index |
+
+Observed:
+
+```
+clean venv with Kaggle-like preinstalled deps
+=== FALLBACK PATH: --no-index --find-links, no network index ===
+install rc=0
+FALLBACK OK: calhousing 0.1.0 | arms ['hgb', 'lgbm', 'rf', 'ridge', 'xgb'] | pipeline builds
+```
+
+`--no-index` is what makes the second row mean anything - pip cannot reach PyPI
+at all, so a missing dependency fails loudly instead of being quietly fetched
+from the network whose absence was being simulated.
+
+**The compile guard fired on its first real outing.** Writing the install cell
+produced:
+
+```
+cell 2 does not compile: unterminated string literal (detected at line 33)
+
+ 32 |         raise SystemExit(
+ 33 |             "Could not install calhousing.
+ 34 | "
+```
+
+A backslash-n written one layer up, in the generator's f-string, became a REAL
+newline inside a string literal in the generated cell - exactly the defect
+`build_notebook.code()`'s docstring predicts, caught before the notebook went
+near Kaggle. Fixed by removing the need to escape at all: the message prints
+line by line and the `SystemExit` carries a single-line string.
+
+### RT-023 - the staging tool refuses, and never uploads (2026-09-20)
+
+**Planted defect:** metadata in which the kernel does not attach the dataset
+the fallback reads. Observed refusal:
+
+```
+SystemExit: kernel-metadata.json does not attach 'someone/calhousing-src' as a
+dataset source, so the offline fallback could never find the wheel.
+```
+
+**The absence of an upload is asserted, not assumed.**
+`test_staging_does_not_upload` monkeypatches `subprocess.run` to raise and
+asserts it is never called. Publishing to a live Kaggle account is
+outward-facing; a tool that does it as a side effect of "staging" will one day
+publish something nobody meant to.
+
+**Two brittleness bugs the tests found in the tool itself:**
+
+1. `Path.relative_to` RAISES on a path outside its argument, so the tool
+   crashed outright when pointed at a directory elsewhere. Now `_display()`.
+2. It staged before validating - the attachment check ran after building a
+   wheel and copying a notebook, leaving half-staged files behind on a
+   misconfiguration. Validation moved first.
+
+Both found by writing tests for a script, which is the argument for `tools/`
+being importable at all.

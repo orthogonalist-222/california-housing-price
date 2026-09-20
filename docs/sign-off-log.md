@@ -70,6 +70,10 @@ Roles in this project: `data scientist`, `ML engineer`, `tech lead`,
 | 2026-09-20 | M4-S3 | **Reproduction from a clean clone** | ML engineer | ML engineer | PASS | Every headline number to the decimal - see RT-024 |
 | 2026-09-20 | M4-S3 | Fixes F-007, F-008, F-009 | ML engineer | ML engineer | PASS | Each red-teamed; F-009 is a process defect of my own |
 | 2026-09-20 | **M4** | **Milestone gate** | ML engineer | ML engineer | **PASS, with one item explicitly not done** | Kernel push to the user's public Kaggle profile is the user's to authorise; everything up to it is verified. Release `v1.0.0`. |
+| 2026-09-21 | M4-S3.1 | Kaggle mount searched, not hardcoded | ML engineer | ML engineer | PASS | F-010; kernel v3 still failed - see RT-026 |
+| 2026-09-21 | M4-S3.2 | Mount search made recursive | ML engineer | ML engineer | PASS | F-011; kernel v4 reached cell 10 |
+| 2026-09-21 | M4-S3.3 | Dependency floor tested in CI | ML engineer | ML engineer | PASS | F-012; `lowest-versions` job green |
+| 2026-09-21 | M4-S3.4 | **Published kernel runs green** | ML engineer | ML engineer | **PASS** | Version 5, `COMPLETE`, zero tracebacks - see RT-027 |
 
 ## Red-team records
 
@@ -905,3 +909,61 @@ tested the ceiling while its own comment claimed it tested the floor - exactly
 the class of defect it exists to catch, inside the guard against it. Caught by
 running it locally and reading the printed versions rather than trusting the
 step name.
+
+### RT-027 - the published kernel runs green (2026-09-21)
+
+**Kernel version 5: `KernelWorkerStatus.COMPLETE`, zero tracebacks in the log.**
+
+<https://www.kaggle.com/code/duonghongphu/california-housing-sklearn-pipeline>
+
+The primary install path worked, the data resolved, and the notebook
+reproduced the committed numbers on Kaggle's own hardware and dependency
+versions:
+
+```
+calhousing 0.1.0 installed from GitHub
+[calhousing] read /kaggle/input/datasets/camnugent/california-housing-prices/housing.csv  ->  20,640 rows x 10 columns
+shape: (20640, 10)        total_bedrooms nulls: 207        ISLAND: 5
+target cap $500,001 -> 965 rows    target floor $14,999 -> 4 rows
+ISLAND train=4 test=1 at seeds 0, 7, 42, 2024
+36 assembled features from 9 raw columns
+```
+
+**Both refusals fired on Kaggle, as designed** - the notebook demonstrates them
+deliberately:
+
+```
+REFUSED: log1p is undefined at or below -1, and would return NaN for:
+         longitude (min -124.3) ...
+REFUSED: drop='first' with handle_unknown='ignore' encodes an unknown category
+         identically to the dropped reference level ...
+```
+
+**Headline, on Kaggle:**
+
+```
+           rmse      mae   r2       n  seconds
+lgbm   42,251.1 26,676.8  0.9 4,128.0      9.2
+stack  42,535.4 26,723.5  0.9 4,128.0    106.3
+rf     43,176.6 27,113.0  0.9 4,128.0     79.5
+ridge  65,142.4 45,540.9  0.7 4,128.0      0.5
+dummy 119,749.8 89,324.1 -0.1 4,128.0      0.5
+```
+
+**Four of five arms match the committed record exactly.** `lgbm` 42,251.1,
+`rf` 43,176.6, `ridge` 65,142.4, `dummy` 119,749.8 - identical to
+`docs/evidence/test-set-evaluation.json`.
+
+**The stack does not: 42,535.4 on Kaggle against 42,622.5 locally**, a 0.2%
+difference. Recorded rather than smoothed over. `StackingRegressor` fits its
+meta-learner on internally cross-validated predictions from four base learners,
+so it accumulates far more floating-point and library-version sensitivity than
+a single estimator - and Kaggle's scikit-learn is a different minor version
+from this machine's. The conclusion is unaffected: the stack is still worse
+than its best member on both.
+
+It is also the arm that reveals the difference most cheaply, which is a mild
+argument for keeping a stacked arm in a comparison even when it loses.
+
+**Also observed:** the segment tables reproduce exactly, including the censored
+rows at `R2 = -5.1` for LightGBM and `-87.8` for the dummy.

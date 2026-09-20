@@ -1,0 +1,46 @@
+[project]
+name = "calhousing"
+version = "0.1.0"
+description = "A scikit-learn preprocessing pipeline for California housing prices, built to survive the dataset's three real defects."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "orthogonalist-222" }
+]
+dependencies = [
+    # Pinned to OVERLAP Kaggle's notebook image, not to the newest release.
+    # The same src/ has to run under this environment and under the kernel, and
+    # the kernel's fallback path installs from a zip with no dependency
+    # resolution at all - so a version this project needs but Kaggle does not
+    # have is a published traceback, not a local test failure.
+    #
+    # pandas 3.x is excluded deliberately: its string-dtype and copy-on-write
+    # changes are behavioural, and this pipeline leans on pandas output from
+    # ColumnTransformer (set_output) for readable feature names.
+    "pandas>=2.2,<3.0",
+    "numpy>=1.26,<3.0",
+    # >=1.4 for set_output(transform="pandas"); >=1.6 would let us drop the
+    # OneHotEncoder sparse_output compatibility note in preprocess/categorical.py.
+    "scikit-learn>=1.5,<1.8",
+    "scipy>=1.13,<2.0",
+    "matplotlib>=3.8,<4.0",
+    "seaborn>=0.13,<0.14",
+    "joblib>=1.3,<2.0",
+]
+
+[project.urls]
+Repository = "https://github.com/orthogonalist-222/california-housing-price"
+
+[build-system]
+requires = ["uv_build>=0.11.25,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ipykernel>=6.29",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

@@ -13,10 +13,15 @@ the defects that give a pipeline something to do:
 | `ocean_proximity == "ISLAND"` | 5 rows | an unseen-category trap in any naive split |
 | `median_house_value` censored at `$500,001` | ~965 rows | an honest error story, reported by segment |
 
-> Status: **M1 complete** (`v0.1.0`) — scaffold and layout gate, schema
-> contract, a split whose rare-category coverage is deterministic, and seven
-> reproducible figures. The pipeline itself lands in M2. This README is
-> rewritten at M4-S3 with the headline numbers.
+> Status: **M2 complete** (`v0.2.0`) — the preprocessing pipeline is built and
+> assembled: impute, de-skew, encode, bin, engineer, and one `ColumnTransformer`
+> that routes them. Models land in M3. This README is rewritten at M4-S3 with
+> the headline numbers.
+>
+> See **[docs/pyspark-to-sklearn.md](docs/pyspark-to-sklearn.md)** for the
+> stage-by-stage translation, and run `uv run python tools/measure_leakage.py`
+> for what leakage actually costs here (less than the folklore claims — and the
+> one that does bite is not the one you are told about).
 
 ## Quick start
 
@@ -24,7 +29,8 @@ the defects that give a pipeline something to do:
 uv sync --dev
 uv run pytest -q
 uv run python tools/check_layout.py
-uv run python -m calhousing.eda      # seven figures -> artifacts/eda/
+uv run python -m calhousing.eda        # seven figures -> artifacts/eda/
+uv run python tools/measure_leakage.py # what leakage costs, measured
 ```
 
 Raw data is never tracked; fetch it with:
@@ -79,6 +85,7 @@ california-housing-price/
 │   └── conftest.py  (synthetic fixtures)          M1-S2
 ├── tools/
 │   ├── check_layout.py                             M1-S1
+│   ├── measure_leakage.py                          M2-S4
 │   ├── build_notebook.py                           M4-S1
 │   └── stage_kaggle.py                             M4-S2
 ├── notebooks/california-housing-sklearn-pipeline.ipynb   M4-S1 (generated)

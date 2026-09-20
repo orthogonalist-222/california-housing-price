@@ -64,6 +64,34 @@ jobs:
       - name: Run tests
         run: uv run --python ${{ matrix.python-version }} pytest -q
 
+  lowest-versions:
+    # The dependency FLOOR, not the ceiling.
+    #
+    # pyproject declares `scikit-learn>=1.5`. CI resolved the newest in range
+    # and every test passed on 1.7.2 - while the code used `quantile_method`,
+    # which only exists from 1.7. Kaggle's image sits below that, pip was
+    # already satisfied so it installed nothing newer, and the PUBLISHED kernel
+    # was where we found out.
+    #
+    # `--resolution lowest-direct` installs the oldest version each declared
+    # bound allows. If the floor is wrong, this job is where it fails - not a
+    # reader's notebook.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Resolve the lowest permitted versions
+        run: uv sync --dev --resolution lowest-direct --python 3.11
+      # `--no-sync` on every run step, or `uv run` silently re-resolves to the
+      # HIGHEST versions and this job tests the ceiling while claiming to test
+      # the floor - the same class of defect it exists to catch.
+      - name: Show what that resolved to
+        run: uv run --no-sync --python 3.11 python -c "import sklearn, pandas, numpy, lightgbm, xgboost; print('sklearn', sklearn.__version__, '| pandas', pandas.__version__, '| numpy', numpy.__version__, '| lgbm', lightgbm.__version__, '| xgb', xgboost.__version__)"
+      - name: Run tests against the floor
+        run: uv run --no-sync --python 3.11 pytest -q
+
   notebook:
     # The notebook is a BUILD OUTPUT of tools/build_notebook.py. Committing it
     # is deliberate - Kaggle needs a file to push and GitHub renders it - but a

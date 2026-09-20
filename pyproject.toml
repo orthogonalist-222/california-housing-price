@@ -45,6 +45,10 @@ build-backend = "uv_build"
 dev = [
     "pytest>=8.0",
     "ipykernel>=6.29",
+    # Executes the generated notebook in CI-adjacent checks. A notebook that is
+    # only ever built and never run is a notebook that fails on Kaggle.
+    "nbclient>=0.10",
+    "nbformat>=5.10",
 ]
 
 [tool.pytest.ini_options]

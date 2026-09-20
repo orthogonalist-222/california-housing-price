@@ -63,3 +63,25 @@ jobs:
 
       - name: Run tests
         run: uv run --python ${{ matrix.python-version }} pytest -q
+
+  notebook:
+    # The notebook is a BUILD OUTPUT of tools/build_notebook.py. Committing it
+    # is deliberate - Kaggle needs a file to push and GitHub renders it - but a
+    # committed build output drifts from its generator the first time somebody
+    # edits the .ipynb directly. This job is what stops that.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: The committed notebook matches its generator
+        run: |
+          uv run python tools/build_notebook.py
+          git diff --exit-code notebooks/             || (echo "::error::notebooks/ is stale - rerun tools/build_notebook.py" && exit 1)

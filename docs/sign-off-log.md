@@ -47,6 +47,10 @@ Roles in this project: `data scientist`, `ML engineer`, `tech lead`,
 | 2026-09-20 | M3-S2 | Layout gate | data scientist | data scientist | PASS | `layout gate OK: 49 tracked files, all declared.` |
 | 2026-09-20 | M3-S2 | Ensembles beat the linear baseline | data scientist | data scientist | PASS | hgb 43,860 / rf 43,352 vs ridge 63,089 - see RT-015 |
 | 2026-09-20 | M3-S2 | Search reaches preprocessing, not just the model | data scientist | data scientist | PASS | 5 of 10 winning params are `preprocess__*` - RT-015 |
+| 2026-09-20 | M3-S3 | `uv run pytest -q` | data scientist | data scientist | PASS | 213 passed |
+| 2026-09-20 | M3-S3 | Layout gate | data scientist | data scientist | PASS | 52 tracked files, all declared |
+| 2026-09-20 | M3-S3 | xgb and lgbm fit inside the pipeline | data scientist | data scientist | PASS | See RT-017 (feature-name interop) |
+| 2026-09-20 | M3-S3 | Fair four-arm comparison | data scientist | data scientist | **PASS, with a negative result** | See RT-018 |
 
 ## Red-team records
 
@@ -484,3 +488,66 @@ cause at its source.
 Related hardening: `run_search` sets `error_score="raise"`. The default is
 `np.nan`, which turns a broken configuration into a merely unlucky one and lets
 a search report a winner while silently discarding half its budget.
+
+### RT-017 - XGBoost refuses the dataset's own category label (2026-09-20)
+
+**Not planted.** Registering `xgb` broke the suite immediately:
+
+```
+ValueError: feature_names must be string, and may not contain [, ] or <
+```
+
+The name is `categorical__ocean_proximity_<1H OCEAN`. The `<` comes from the
+DATASET's category label, through the one-hot encoder. Every pipeline branch is
+innocent; the library refuses the character.
+
+**Rejected:** handing XGBoost a bare ndarray (works, and throws away the
+readable names the pipeline exists to preserve - M3-S4's importance plot would
+read `f17`), and renaming the category in `config` (edits the data to suit a
+library).
+
+**Shipped:** `SanitiseFeatureNames`, between the assembler and the model, which
+rewrites the NAME (`<` -> `lt`) so `ocean_proximity_lt1H OCEAN` stays readable.
+It **refuses collisions** rather than merging - two features sharing a name is
+worse than the character being avoided - and there is a test for that refusal.
+`feature_names()` now reports `pipeline[:-1]`, so what it returns is what the
+model actually saw.
+
+### RT-018 - the four-arm comparison, and its negative result (2026-09-20)
+
+**The re-run was the point.** M3-S2's two winners both pinned the TOP of
+`n_clusters` and `n_bins`. M3-S3 widened those ranges, which left `rf` and `hgb`
+searched over a DIFFERENT space from `xgb` and `lgbm` - comparing them would
+have measured the search space, not the model. Both were re-run (about fifty
+minutes of wall clock). `rf` moved 43,352 -> **42,707**; `hgb` 43,860 -> 43,571.
+Under the old ranges `rf` looked worse than it is.
+
+| model | CV RMSE | fold std | train RMSE | winning fit | artefact |
+| --- | --- | --- | --- | --- | --- |
+| ridge | 63,089 | +/-1,993 | 62,875 | 0.1s | - |
+| hgb | 43,571 | +/-1,445 | 23,131 | 5.0s | 3.3 MB |
+| rf | 42,707 | +/-1,178 | 15,852 | 115.5s | **289.4 MB** |
+| xgb | 42,401 | +/-1,360 | 4,996 | 20.3s | 13.5 MB |
+| lgbm | **42,166** | +/-1,407 | 9,052 | **5.1s** | 6.8 MB |
+
+**The negative result, stated plainly: no ensemble is better than any other.**
+The four span 1,405 RMSE while their own fold standard deviations run +/-1,178
+to +/-1,445. The whole spread is about one arm's own fold noise. Crowning
+LightGBM on 42,166 vs 42,401 would be reading noise.
+
+**What the evidence DOES separate is cost.** RandomForest is 289 MB and 115s
+per fit against LightGBM's 6.8 MB and 5.1s for an indistinguishable score - 43x
+the storage and 23x the time for nothing measurable. On a kernel with a runtime
+budget and a dataset size limit that is the entire decision, and it is why
+M3-S4 builds around LightGBM.
+
+**Still not converged, and said so:** `rf` pinned `n_clusters=45`, the top of
+the WIDENED range. Not chased - the arms are within noise, so another widening
+buys a better-looking number for one arm and no new knowledge. Recorded as a
+limitation instead.
+
+**A warning deliberately left in.** `KBinsDiscretizer` reports removing
+zero-width bins for `housing_median_age` (52 distinct values, 1,273 rows piled
+on 52). Benign - the effective bin count is data-dependent - but not suppressed,
+because the honest reading is that `n_bins` above ~12 is a request the data
+cannot always satisfy, and a silenced warning is a fact nobody rediscovers.

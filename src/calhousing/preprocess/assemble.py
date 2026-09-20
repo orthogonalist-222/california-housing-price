@@ -36,18 +36,28 @@ That is the difference this project exists to make visible, and
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
-from sklearn.base import BaseEstimator
+import numpy as np
+import pandas as pd
+from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
+from sklearn.utils.validation import check_is_fitted
 
 from .. import config
 from .categorical import build_binned_block, build_categorical_block
 from .features import ClusterSimilarity, QuantileClipper, RatioFeatures
 from .numeric import build_numeric_block, make_imputer, make_scaler
 
-__all__ = ["BRANCHES", "build_preprocessor", "build_pipeline", "feature_names"]
+__all__ = [
+    "BRANCHES",
+    "SanitiseFeatureNames",
+    "build_preprocessor",
+    "build_pipeline",
+    "feature_names",
+]
 
 #: Branch names, in assembly order. Public: M3-S2 addresses them by path
 #: (``preprocess__heavy__deskew``), so a rename silently empties a search space.
@@ -61,6 +71,63 @@ _PLAIN_NUMERIC = ["longitude", "latitude", "housing_median_age", "median_income"
 _COUNT_COLUMNS = ["total_rooms", "total_bedrooms", "population", "households"]
 _GEO_COLUMNS = ["latitude", "longitude", "population"]
 _BINNED_COLUMNS = ["median_income", "housing_median_age"]
+
+
+#: Characters XGBoost refuses in a feature name, and what they become.
+#: ``<`` arrives from the category ``"<1H OCEAN"`` via the one-hot encoder.
+_UNSAFE_NAME_CHARS = {"<": "lt", ">": "gt", "[": "(", "]": ")", ",": ";"}
+
+
+class SanitiseFeatureNames(BaseEstimator, TransformerMixin):
+    """Rename columns so every downstream library will accept them.
+
+    Added in M3-S3, after XGBoost refused to fit::
+
+        ValueError: feature_names must be string, and may not contain [, ] or <
+
+    The offending name is ``categorical__ocean_proximity_<1H OCEAN`` - the
+    ``<`` comes from the dataset's own category label, through the one-hot
+    encoder, and every branch of this pipeline is innocent.
+
+    Two rejected alternatives. Handing XGBoost a bare numpy array would work
+    and would throw away the readable names the whole pipeline exists to
+    preserve. Renaming the category in ``config`` would edit the data to suit a
+    library. Rewriting the *name* keeps both the data and the readability:
+    ``ocean_proximity_lt1H OCEAN`` is still obvious to a reader.
+
+    Collisions are refused rather than silently merged - two features sharing a
+    name is a worse problem than the one being fixed.
+    """
+
+    def fit(self, X, y=None):
+        frame = X if isinstance(X, pd.DataFrame) else pd.DataFrame(X)
+        renamed = [self._safe(str(name)) for name in frame.columns]
+        duplicates = {n for n in renamed if renamed.count(n) > 1}
+        if duplicates:
+            raise ValueError(
+                f"Sanitising feature names produced collisions: {sorted(duplicates)}. "
+                "Two features sharing a name is worse than the character they "
+                "were renamed to avoid."
+            )
+        self.feature_names_in_ = np.asarray(frame.columns, dtype=object)
+        self.feature_names_out_ = np.asarray(renamed, dtype=object)
+        self.n_features_in_ = frame.shape[1]
+        return self
+
+    def transform(self, X) -> pd.DataFrame:
+        check_is_fitted(self, "feature_names_out_")
+        frame = X if isinstance(X, pd.DataFrame) else pd.DataFrame(X)
+        return frame.set_axis(list(self.feature_names_out_), axis=1)
+
+    def get_feature_names_out(self, input_features=None) -> np.ndarray:
+        check_is_fitted(self, "feature_names_out_")
+        return self.feature_names_out_
+
+    @staticmethod
+    def _safe(name: str) -> str:
+        for bad, good in _UNSAFE_NAME_CHARS.items():
+            name = name.replace(bad, good)
+        return re.sub(r"\s+", " ", name).strip()
 
 
 def _ratio_branch(imputer: str, scaler: str, seed: int, clip: float) -> Pipeline:
@@ -161,6 +228,10 @@ def build_pipeline(estimator: BaseEstimator, **preprocessor_kwargs: Any) -> Pipe
     return Pipeline(
         steps=[
             ("preprocess", build_preprocessor(**preprocessor_kwargs)),
+            # Between the assembler and the model, because the name a model
+            # sees has to satisfy that model's library - and XGBoost rejects
+            # the `<` that arrives from the dataset's own category label.
+            ("names", SanitiseFeatureNames()),
             ("model", estimator),
         ]
     )
@@ -175,7 +246,8 @@ def feature_names(fitted: Pipeline | ColumnTransformer) -> list[str]:
     ``total_rooms``" and "the model likes the de-skewed ``total_rooms``, not
     the one inside the ratios".
     """
-    transformer = (
-        fitted.named_steps["preprocess"] if isinstance(fitted, Pipeline) else fitted
-    )
-    return list(transformer.get_feature_names_out())
+    if isinstance(fitted, Pipeline):
+        # Everything up to but excluding the estimator, so the names returned
+        # are the ones the MODEL actually sees - after sanitising, not before.
+        return list(fitted[:-1].get_feature_names_out())
+    return list(fitted.get_feature_names_out())

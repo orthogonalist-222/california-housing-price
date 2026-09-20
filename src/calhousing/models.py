@@ -20,7 +20,9 @@ from sklearn.base import BaseEstimator, clone
 from sklearn.dummy import DummyRegressor
 from sklearn.ensemble import HistGradientBoostingRegressor, RandomForestRegressor
 from sklearn.linear_model import LinearRegression, Ridge
+from lightgbm import LGBMRegressor
 from sklearn.model_selection import KFold, cross_validate
+from xgboost import XGBRegressor
 
 from . import config
 from .preprocess.assemble import build_pipeline
@@ -83,6 +85,30 @@ def _random_forest() -> BaseEstimator:
 
 def _hist_gradient_boosting() -> BaseEstimator:
     return HistGradientBoostingRegressor(random_state=config.RANDOM_SEED)
+
+
+def _xgboost() -> BaseEstimator:
+    # `n_jobs=1` for the same reason as the forest: the SEARCH parallelises
+    # across draws, and a thread pool inside a process pool oversubscribes.
+    return XGBRegressor(
+        random_state=config.RANDOM_SEED,
+        n_jobs=1,
+        tree_method="hist",
+        # XGBoost 2.x renamed several parameters. Setting the ones this project
+        # uses explicitly means a version bump inside the declared range cannot
+        # silently change a default underneath the recorded results.
+        objective="reg:squarederror",
+    )
+
+
+def _lightgbm() -> BaseEstimator:
+    return LGBMRegressor(
+        random_state=config.RANDOM_SEED,
+        n_jobs=1,
+        # LightGBM prints a per-fit banner otherwise; across 25 draws x 5 folds
+        # that is 125 banners burying the only line anybody reads.
+        verbosity=-1,
+    )
 
 
 #: Every model this project knows about. M3-S2 and M3-S3 add to it; nothing
@@ -150,6 +176,45 @@ REGISTRY: dict[str, ModelSpec] = {
         },
         cost="medium",
     ),
+    "xgb": ModelSpec(
+        name="xgb",
+        factory=_xgboost,
+        why=(
+            "The library most Kaggle tabular baselines are written in. Included "
+            "so the comparison is against what a reader would actually reach "
+            "for, not only against what ships with scikit-learn."
+        ),
+        search_space={
+            "model__n_estimators": [300, 600, 1000],
+            "model__learning_rate": [0.03, 0.05, 0.1],
+            "model__max_depth": [4, 6, 8, 10],
+            "model__subsample": [0.7, 0.85, 1.0],
+            "model__colsample_bytree": [0.6, 0.8, 1.0],
+            "model__reg_lambda": [0.5, 1.0, 5.0],
+            "model__min_child_weight": [1, 5, 20],
+        },
+        cost="medium",
+    ),
+    "lgbm": ModelSpec(
+        name="lgbm",
+        factory=_lightgbm,
+        why=(
+            "Leaf-wise growth, which is a genuinely different inductive bias "
+            "from the level-wise trees above - so it is a real second opinion "
+            "for the stack in M3-S4, not a fourth copy of the same one."
+        ),
+        search_space={
+            "model__n_estimators": [300, 600, 1000],
+            "model__learning_rate": [0.03, 0.05, 0.1],
+            "model__num_leaves": [31, 63, 127, 255],
+            "model__min_child_samples": [5, 20, 50],
+            "model__subsample": [0.7, 0.85, 1.0],
+            "model__subsample_freq": [1],
+            "model__colsample_bytree": [0.6, 0.8, 1.0],
+            "model__reg_lambda": [0.0, 1.0, 5.0],
+        },
+        cost="medium",
+    ),
 }
 
 #: Preprocessing hyperparameters, shared by every model's search.
@@ -173,9 +238,12 @@ PREPROCESS_SEARCH_SPACE: dict[str, Any] = {
         make_deskew("log"),
         make_deskew("yeo-johnson"),
     ],
-    "preprocess__geo__n_clusters": [5, 10, 15, 20],
+    # Widened in M3-S3: both M3-S2 winners chose the TOP of the old ranges
+    # (n_clusters=20, n_bins=8), which means the search was cut off rather
+    # than converged. A boundary winner is a range that has not been tested.
+    "preprocess__geo__n_clusters": [5, 10, 20, 30, 45],
     "preprocess__geo__gamma": [0.1, 0.3, 1.0, 3.0],
-    "preprocess__binned__bin__n_bins": [3, 5, 8],
+    "preprocess__binned__bin__n_bins": [3, 5, 8, 12, 16],
 }
 
 

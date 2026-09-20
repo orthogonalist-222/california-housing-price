@@ -72,6 +72,10 @@ DECLARED: list[tuple[str, str]] = [
     ("tests/test_assemble.py", "M2-S4"),
     ("tools/measure_leakage.py", "M2-S4"),
     ("docs/pyspark-to-sklearn.md", "M2-S4"),
+    # --- M3-S1: CV harness, metrics, baselines ------------------------------
+    ("src/calhousing/evaluate.py", "M3-S1"),
+    ("src/calhousing/models.py", "M3-S1"),
+    ("tests/test_evaluate.py", "M3-S1"),
 ]
 
 #: Paths that must never be tracked, with the reason the gate gives when it

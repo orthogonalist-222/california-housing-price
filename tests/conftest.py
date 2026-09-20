@@ -51,12 +51,31 @@ def make_housing(
             "population": households * rng.uniform(1.5, 4.0, n),
             "households": households,
             "median_income": rng.uniform(0.5, 15.0, n),
-            config.TARGET: rng.uniform(20_000, 480_000, n).round(),
+            # A target with REAL SIGNAL, not a uniform draw - filled in below,
+            # once every predictor column exists. Kept in place here so the
+            # column ORDER still matches the raw CSV.
+            #
+            # Found in M3-S1: with a random target no model can beat a median
+            # predictor, so `test_a_real_model_beats_the_dummy` failed against
+            # correct code. A fixture that reproduces a dataset's shape but not
+            # its LEARNABILITY cannot test anything above the transformer level.
+            config.TARGET: np.nan,
             "ocean_proximity": rng.choice(
                 ["<1H OCEAN", "INLAND", "NEAR OCEAN", "NEAR BAY"], n
             ),
         }
     )
+
+    # Deliberately crude: income drives price, the southern coast is dearer,
+    # crowding is cheap. The tests assert RELATIONSHIPS (a model beats the
+    # median, the inland segment can look worse), never coefficients.
+    frame[config.TARGET] = (
+        30_000.0
+        + 28_000.0 * frame["median_income"]
+        + 1_200.0 * (42.0 - frame["latitude"])
+        - 2_500.0 * (frame["population"] / frame["households"])
+        + rng.normal(0.0, 35_000.0, n)
+    ).clip(20_000.0, 480_000.0).round()
 
     # The rare level, planted deliberately: this is the property the split and
     # the encoders are built around.

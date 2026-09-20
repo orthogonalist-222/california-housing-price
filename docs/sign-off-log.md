@@ -816,3 +816,46 @@ when green" was enforced by nothing, and the loop printed the failures
 immediately above the merge. The merge command now asserts every conclusion is
 `SUCCESS` first. Logged at the same severity as a code defect: a process
 failure that produces a broken `main` is not a smaller thing than a bug.
+
+### RT-025 - the published kernel, and what it taught (2026-09-21)
+
+**Point story M4-S3.1: broken production.** The kernel was pushed, ran, and
+**errored** on its first data cell.
+
+```
+[stdout] calhousing 0.1.0 installed from GitHub
+[stderr] DataNotFoundError: Raw CSV not found. Tried, in order:
+[stderr]     /kaggle/input/california-housing-prices/housing.csv
+```
+
+Three things that log settles, two of them good news:
+
+1. **The GitHub install path works on Kaggle.** `calhousing 0.1.0 installed
+   from GitHub` is the primary path of ADR-004, verified on the real runner
+   rather than in a simulated venv.
+2. **The schema contract's refusal fired correctly** - it said exactly what it
+   could not find. F-010 is that it could not say what it *did* find.
+3. **The mount path was hardcoded and wrong** (F-010). `resolve_csv` now
+   searches `/kaggle/input/*/housing.csv` and `*/*/housing.csv` by NAME, and
+   the refusal lists what is actually mounted.
+
+**And a consequence of ADR-004 that showed up immediately.** After fixing the
+loader locally, the re-pushed kernel failed with the SAME old traceback and the
+same old line number - because the kernel installs from GitHub `main`, and the
+fix was still on a branch. ADR-004 predicted this in the abstract ("the two
+paths can serve different code"); here it is concretely. The fix has to reach
+`main` before the kernel can see it, which makes the publish step downstream of
+the merge, not parallel to it.
+
+**Also observed:** `kaggle datasets create` makes a dataset **private** by
+default and the CLI offers no way to change visibility afterwards (`-u/--public`
+exists only at creation, and there is no `delete`). `duonghongphu/calhousing-src`
+is therefore private. The kernel runs with Internet ON so the GitHub path is
+primary and public viewers are unaffected; making the fallback usable by others
+is a one-click change on the dataset's Kaggle page. `stage_kaggle.py` now
+prints `--public` in its create command so this cannot happen twice.
+
+**Also observed, mine:** my status poll matched `*error*` and `*Error*` against
+a string containing `ERROR`, so it did not stop on the terminal state and ran
+until its timeout. Same shape as F-009 - a filter that does not cover the
+failure path, where silence looks exactly like "still running".

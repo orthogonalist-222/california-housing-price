@@ -90,6 +90,11 @@ DECLARED: list[tuple[str, str]] = [
     ("tools/run_notebook.py", "M4-S1"),
     ("notebooks/california-housing-sklearn-pipeline.ipynb", "M4-S1"),
     ("tests/test_notebook_build.py", "M4-S1"),
+    # --- M4-S2: Kaggle packaging, both paths --------------------------------
+    ("tools/stage_kaggle.py", "M4-S2"),
+    ("kaggle/src_dataset/dataset-metadata.json", "M4-S2"),
+    ("kaggle/kernel/kernel-metadata.json", "M4-S2"),
+    ("tests/test_packaging.py", "M4-S2"),
 ]
 
 #: Paths that must never be tracked, with the reason the gate gives when it

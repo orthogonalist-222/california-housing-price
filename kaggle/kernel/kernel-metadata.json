@@ -1,0 +1,18 @@
+{
+  "id": "duonghongphu/california-housing-sklearn-pipeline",
+  "title": "California Housing: a scikit-learn preprocessing pipeline",
+  "code_file": "california-housing-sklearn-pipeline.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": "false",
+  "enable_gpu": "false",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "dataset_sources": [
+    "camnugent/california-housing-prices",
+    "duonghongphu/calhousing-src"
+  ],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "model_sources": []
+}

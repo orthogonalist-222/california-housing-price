@@ -133,14 +133,52 @@ INSTALL_TAG = "# tag:install"
 code(
     f"""
 {INSTALL_TAG}
-import subprocess, sys
+# Two ways in, because one of them is not always available.
+#
+#   1. pip install from GitHub - always current, needs the notebook's Internet
+#      toggle ON. A reader can flip that off, and a competition kernel cannot
+#      turn it on at all.
+#   2. a wheel from the attached `calhousing-src` dataset - works offline, and
+#      is whatever was last staged rather than whatever is on main.
+#
+# The fallback is not decoration: it is the difference between this notebook
+# running for a reader and showing them a traceback.
+import glob
+import subprocess
+import sys
 
-subprocess.run(
-    [sys.executable, "-m", "pip", "install", "-q",
-     "git+https://github.com/orthogonalist-222/california-housing-price"],
-    check=True,
-)
-print("calhousing installed")
+REPO = "git+{REPO}"
+FALLBACK_DIR = "/kaggle/input/calhousing-src"
+
+
+def _pip(*args) -> int:
+    return subprocess.run(
+        [sys.executable, "-m", "pip", "install", "-q", *args]
+    ).returncode
+
+
+source = None
+if _pip(REPO) == 0:
+    source = "GitHub"
+else:
+    wheels = sorted(glob.glob(FALLBACK_DIR + "/*.whl"))
+    if not wheels:
+        # Printed line by line rather than joined with an escape. Cell sources
+        # are Python assembled by other Python, and a backslash-n written one
+        # layer up becomes a real newline inside a string literal down here -
+        # which is precisely the defect build_notebook's compile() guard
+        # caught when this cell was first written.
+        print("Could not install calhousing.")
+        print("  - the GitHub install failed (is the Internet toggle on?)")
+        print(f"  - and no wheel was found in {{FALLBACK_DIR}}")
+        raise SystemExit("Attach the calhousing-src dataset, or enable Internet.")
+    if _pip("--no-index", "--find-links", FALLBACK_DIR, wheels[-1]) != 0:
+        raise SystemExit(f"Found {{wheels[-1]}} but pip refused to install it.")
+    source = "the attached Kaggle dataset (offline)"
+
+import calhousing
+
+print(f"calhousing {{calhousing.__version__}} installed from {{source}}")
 """
 )
 

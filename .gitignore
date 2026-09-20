@@ -23,8 +23,10 @@ artifacts/
 # Notebook scratch
 .ipynb_checkpoints/
 
-# Staged copies assembled at publish time.
+# Staged copies assembled at publish time. The wheel is a build output and
+# the notebook is committed once, at its source in notebooks/.
 kaggle/src_dataset/*.zip
+kaggle/src_dataset/*.whl
 kaggle/kernel/*.ipynb
 
 # PyCharm

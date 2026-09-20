@@ -39,6 +39,10 @@ Roles in this project: `data scientist`, `ML engineer`, `tech lead`,
 | 2026-09-20 | M2-S4 | Leakage measurement | data scientist | data scientist | **PASS, with a corrected claim** | See RT-012 below |
 | 2026-09-20 | M2-S4 | Institutional-outlier regression | data scientist | data scientist | PASS | See RT-013 below; finding F-004 |
 | 2026-09-20 | **M2** | **Milestone gate** | data scientist | data scientist | **PASS** | All four stories' Accept-when observed; F-001..F-004 closed, no open S1/S2. Release `v0.2.0`. |
+| 2026-09-20 | M3-S1 | `uv run pytest -q` | data scientist | data scientist | PASS | 176 passed |
+| 2026-09-20 | M3-S1 | Layout gate | data scientist | data scientist | PASS | `layout gate OK: 46 tracked files, all declared.` |
+| 2026-09-20 | M3-S1 | Baselines cross-validated | data scientist | data scientist | PASS | dummy 118,322 / linear 63,094 / ridge 63,089 - see RT-014 |
+| 2026-09-20 | M3-S1 | ADR-003 freezes the one-shot run **before** it happens | data scientist | data scientist | PASS | Five arms named, segment table required, unfalsifiable list written |
 
 ## Red-team records
 
@@ -359,3 +363,34 @@ from 65 838 to 63 811 with the fold spread down from +/-1 868 to +/-1 430.
 Pinned by `test_an_institutional_block_group_does_not_blow_up_predictions`,
 which asserts predictions stay inside a sane multiple of the target range
 rather than pinning a number. Registered as F-004.
+
+### RT-014 - baselines on the training split (2026-09-20)
+
+Five-fold CV over the whole pipeline, seed 42, training split only. The test
+set has not been touched.
+
+```
+          RMSE            MAE        R2      train RMSE
+dummy    118,322 +/- 1,786   88,119   -0.055     118,330
+linear    63,094 +/- 2,004   45,261    0.700      62,872
+ridge     63,089 +/- 1,993   45,265    0.700      62,875
+```
+
+Three readings recorded so they are not rediscovered later:
+
+- **The dummy's R2 is negative and that is correct.** It predicts the training
+  MEDIAN; R2 is defined against the MEAN. A median predictor is optimal for MAE
+  and slightly worse than the mean under squared error.
+- **Ridge and linear are indistinguishable** (63,089 vs 63,094 on a +/-2,000
+  spread). The penalty is doing nothing on these 36 features yet.
+- **Train and test RMSE agree to 0.3%.** These models underfit. That gap is what
+  M3-S2 exists to close.
+
+**Search-space guards, both halves.** A key that names no real step is accepted
+at definition time and raises only once a search starts fitting - minutes in.
+`test_search_space_paths_all_resolve` checks every key against the real
+pipeline's parameters, and `test_every_search_space_value_is_settable` fits with
+each first value. The imputer entries are OBJECTS rather than strings for a
+related reason: a search sets pipeline steps, so `"median"` would be rejected
+while `"passthrough"` would be quietly accepted and let the 207 nulls reach an
+estimator that cannot take them.

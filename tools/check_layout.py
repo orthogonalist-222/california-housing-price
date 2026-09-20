@@ -46,6 +46,14 @@ DECLARED: list[tuple[str, str]] = [
     ("src/calhousing/py.typed", "M1-S1"),
     ("tools/check_layout.py", "M1-S1"),
     ("tests/test_layout.py", "M1-S1"),
+    # --- M1-S2: data contract and split ------------------------------------
+    ("docs/adr/*.md", "M1-S2"),
+    ("src/calhousing/config.py", "M1-S2"),
+    ("src/calhousing/data.py", "M1-S2"),
+    ("src/calhousing/splits.py", "M1-S2"),
+    ("tests/conftest.py", "M1-S2"),
+    ("tests/test_data.py", "M1-S2"),
+    ("tests/test_splits.py", "M1-S2"),
 ]
 
 #: Paths that must never be tracked, with the reason the gate gives when it

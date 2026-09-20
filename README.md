@@ -13,9 +13,10 @@ the defects that give a pipeline something to do:
 | `ocean_proximity == "ISLAND"` | 5 rows | an unseen-category trap in any naive split |
 | `median_house_value` censored at `$500,001` | ~965 rows | an honest error story, reported by segment |
 
-> Status: **M1-S2 complete** — scaffold, layout gate, schema contract and a
-> leakage-safe split. The pipeline itself lands in M2. This README is rewritten
-> at M4-S3 with the headline numbers.
+> Status: **M1 complete** (`v0.1.0`) — scaffold and layout gate, schema
+> contract, a split whose rare-category coverage is deterministic, and seven
+> reproducible figures. The pipeline itself lands in M2. This README is
+> rewritten at M4-S3 with the headline numbers.
 
 ## Quick start
 
@@ -23,6 +24,7 @@ the defects that give a pipeline something to do:
 uv sync --dev
 uv run pytest -q
 uv run python tools/check_layout.py
+uv run python -m calhousing.eda      # seven figures -> artifacts/eda/
 ```
 
 Raw data is never tracked; fetch it with:

@@ -145,6 +145,67 @@ def test_missing_file_raises_with_every_location_tried(tmp_path, monkeypatch) ->
     assert not isinstance(exc.value, SchemaError)
 
 
+def test_a_kaggle_mount_is_searched_not_hardcoded(tmp_path, monkeypatch, housing) -> None:
+    """Red-team F-010, which reached a published kernel.
+
+    The loader used to hardcode
+    ``/kaggle/input/california-housing-prices/housing.csv``. On the real kernel
+    the file was not there, and the notebook died on its first data cell with a
+    message that listed the paths it wanted and nothing about what was actually
+    mounted.
+
+    The mount directory is named for the dataset slug and depends on what is
+    attached and how, so the file is found by NAME under whatever is there.
+    """
+    monkeypatch.delenv(config.CSV_ENV_VAR, raising=False)
+    mount = tmp_path / "input"
+    # A slug this project has never heard of - the point is that it still works.
+    dataset = mount / "some-other-slug"
+    dataset.mkdir(parents=True)
+    housing.to_csv(dataset / config.CSV_NAME, index=False)
+
+    monkeypatch.setattr(config, "KAGGLE_INPUT", mount)
+    monkeypatch.setattr(config, "_CSV_CANDIDATES", [tmp_path / "nowhere.csv"])
+    assert config.resolve_csv() == dataset / config.CSV_NAME
+
+
+def test_a_nested_kaggle_mount_is_found(tmp_path, monkeypatch, housing) -> None:
+    """Some datasets mount the file one directory deeper."""
+    monkeypatch.delenv(config.CSV_ENV_VAR, raising=False)
+    mount = tmp_path / "input"
+    nested = mount / "a-dataset" / "sub"
+    nested.mkdir(parents=True)
+    housing.to_csv(nested / config.CSV_NAME, index=False)
+
+    monkeypatch.setattr(config, "KAGGLE_INPUT", mount)
+    monkeypatch.setattr(config, "_CSV_CANDIDATES", [tmp_path / "nowhere.csv"])
+    assert config.resolve_csv() == nested / config.CSV_NAME
+
+
+def test_the_kaggle_failure_says_what_is_mounted(tmp_path, monkeypatch) -> None:
+    """The other half. A refusal that lists only what it WANTED leaves the
+    reader guessing - which is what happened on the published kernel."""
+    monkeypatch.delenv(config.CSV_ENV_VAR, raising=False)
+    mount = tmp_path / "input"
+    (mount / "something-else").mkdir(parents=True)
+
+    monkeypatch.setattr(config, "KAGGLE_INPUT", mount)
+    monkeypatch.setattr(config, "_CSV_CANDIDATES", [tmp_path / "nowhere.csv"])
+    with pytest.raises(config.DataNotFoundError) as exc:
+        config.resolve_csv()
+    message = str(exc.value)
+    assert "something-else" in message, "the refusal must name what IS mounted"
+    assert "Attach the camnugent" in message
+
+
+def test_no_kaggle_mount_gives_the_local_instructions(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv(config.CSV_ENV_VAR, raising=False)
+    monkeypatch.setattr(config, "KAGGLE_INPUT", tmp_path / "absent")
+    monkeypatch.setattr(config, "_CSV_CANDIDATES", [tmp_path / "nowhere.csv"])
+    with pytest.raises(config.DataNotFoundError, match="kaggle datasets download"):
+        config.resolve_csv()
+
+
 def test_explicit_path_wins(tmp_path, housing: pd.DataFrame) -> None:
     path = tmp_path / "elsewhere.csv"
     housing.to_csv(path, index=False)

@@ -1,6 +1,6 @@
 {
   "id": "duonghongphu/california-housing-sklearn-pipeline",
-  "title": "California Housing: a scikit-learn preprocessing pipeline",
+  "title": "California Housing Sklearn Pipeline",
   "code_file": "california-housing-sklearn-pipeline.ipynb",
   "language": "python",
   "kernel_type": "notebook",

@@ -75,16 +75,39 @@ VALUE_RANGES: dict[str, tuple[float, float]] = {
     TARGET: (0.0, 600_000.0),
 }
 
-#: Where the raw CSV is looked for, in order. The Kaggle path comes first
-#: because the kernel is the environment we cannot edit; the local path is the
-#: development default.
+#: Directory Kaggle mounts attached datasets under.
+KAGGLE_INPUT = Path("/kaggle/input")
+
+#: The raw file's name, whatever directory it arrives in.
+CSV_NAME = "housing.csv"
+
+#: Non-Kaggle candidates, in order. The Kaggle mount is SEARCHED rather than
+#: hardcoded — see ``_kaggle_candidates``.
 _CSV_CANDIDATES = [
-    Path("/kaggle/input/california-housing-prices/housing.csv"),
-    Path("data/raw/housing.csv"),
+    Path("data/raw") / CSV_NAME,
 ]
 
 #: Override, for a checkout that keeps its data elsewhere.
 CSV_ENV_VAR = "CALHOUSING_CSV"
+
+
+def _kaggle_candidates() -> list[Path]:
+    """Every ``housing.csv`` under an attached Kaggle dataset.
+
+    Hardcoding ``/kaggle/input/california-housing-prices/housing.csv`` was
+    wrong on the real kernel (F-010): the published notebook died on its first
+    data cell with a ``DataNotFoundError`` that listed the paths it wanted and
+    said nothing about what was actually mounted.
+
+    The mount directory is named for the dataset slug and depends on what is
+    attached and how — which is not something this module can know. So the file
+    is found by NAME under whatever is there, sorted for determinism.
+    """
+    if not KAGGLE_INPUT.is_dir():
+        return []
+    return sorted(KAGGLE_INPUT.glob(f"*/{CSV_NAME}")) + sorted(
+        KAGGLE_INPUT.glob(f"*/*/{CSV_NAME}")
+    )
 
 
 class DataNotFoundError(FileNotFoundError):
@@ -119,17 +142,26 @@ def resolve_csv(explicit: str | os.PathLike[str] | None = None) -> Path:
             return path
         tried.append(path)
 
-    for candidate in _CSV_CANDIDATES:
+    for candidate in _kaggle_candidates() + _CSV_CANDIDATES:
         if candidate.is_file():
             return candidate
         tried.append(candidate)
 
-    locations = "\n".join(f"    {p}" for p in tried)
-    raise DataNotFoundError(
-        "Raw CSV not found. Tried, in order:\n"
-        f"{locations}\n"
-        "Fetch it with:\n"
-        "    kaggle datasets download -d camnugent/california-housing-prices "
-        "-p data/raw --unzip\n"
-        f"or point {CSV_ENV_VAR} at an existing copy."
-    )
+    lines = ["Raw CSV not found. Tried, in order:"]
+    lines += [f"    {p}" for p in tried] or ["    (nothing)"]
+
+    # On Kaggle, say what IS mounted. The message this replaces named only the
+    # paths it wanted and left the reader to guess what was actually attached -
+    # which is how F-010 reached a published kernel.
+    if KAGGLE_INPUT.is_dir():
+        mounted = sorted(p.name for p in KAGGLE_INPUT.iterdir())
+        lines.append(f"    {KAGGLE_INPUT} contains: {mounted or '(empty)'}")
+        lines.append("    Attach the camnugent/california-housing-prices dataset.")
+    else:
+        lines.append("Fetch it with:")
+        lines.append(
+            "    kaggle datasets download -d camnugent/california-housing-prices"
+            " -p data/raw --unzip"
+        )
+    lines.append(f"or point {CSV_ENV_VAR} at an existing copy.")
+    raise DataNotFoundError("\n".join(lines))

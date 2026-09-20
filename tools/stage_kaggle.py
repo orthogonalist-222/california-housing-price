@@ -151,7 +151,11 @@ def main(argv: list[str] | None = None) -> int:
     print("To publish, run these yourself - this script does not upload:")
     print()
     print(f"  # 1. the package, as a dataset  ({dataset_id})")
-    print(f"  kaggle datasets create  -p {_display(DATASET_DIR)} --dir-mode zip")
+    # `--public` is not optional: a dataset is created PRIVATE by default and
+    # the CLI has no way to change that afterwards - no `delete`, and `-u`
+    # only applies at creation. Getting it wrong means a manual fix on the
+    # website (F-010).
+    print(f"  kaggle datasets create  -p {_display(DATASET_DIR)} --dir-mode zip --public")
     print(f"  #    ...or, after the first time:")
     print(
         f"  kaggle datasets version -p {_display(DATASET_DIR)} --dir-mode zip "

@@ -76,6 +76,9 @@ DECLARED: list[tuple[str, str]] = [
     ("src/calhousing/evaluate.py", "M3-S1"),
     ("src/calhousing/models.py", "M3-S1"),
     ("tests/test_evaluate.py", "M3-S1"),
+    # --- M3-S2: tuned ensembles ---------------------------------------------
+    ("src/calhousing/train.py", "M3-S2"),
+    ("tests/test_train.py", "M3-S2"),
 ]
 
 #: Paths that must never be tracked, with the reason the gate gives when it

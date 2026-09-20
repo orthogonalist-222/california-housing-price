@@ -57,6 +57,29 @@ __all__ = [
     "build_numeric_block",
 ]
 
+def _pandas(transformer):
+    """Configure a transformer to emit pandas, and return it.
+
+    Every factory below routes through this, and it is not decoration.
+    ``build_numeric_block`` calls ``set_output`` on the *Pipeline*, which
+    configures the steps that exist **at that moment**. A search that later
+    replaces a step - ``preprocess__heavy__impute=SimpleImputer()`` - installs
+    an estimator nobody configured, it returns a bare ndarray, and the branch
+    loses its index.
+
+    What that looks like downstream (F-006)::
+
+        ValueError: Concatenating DataFrames from the transformer's output lead
+        to an inconsistent number of samples. The output may have Pandas
+        Indexes that do not match...
+
+    Raised by ``ColumnTransformer``, naming neither the branch nor the step,
+    minutes into a search. Configuring the object at construction means any
+    factory output is safe to drop into a pipeline.
+    """
+    return transformer.set_output(transform="pandas")
+
+
 IMPUTERS = ("median", "mean", "knn", "iterative")
 DESKEWERS = ("none", "log", "yeo-johnson")
 SCALERS = ("standard", "robust", "minmax", "none")
@@ -135,18 +158,20 @@ def make_imputer(kind: str = "median", *, seed: int = config.RANDOM_SEED) -> Bas
     distribution barely contains.
     """
     if kind == "median":
-        return SimpleImputer(strategy="median")
+        return _pandas(SimpleImputer(strategy="median"))
     if kind == "mean":
-        return SimpleImputer(strategy="mean")
+        return _pandas(SimpleImputer(strategy="mean"))
     if kind == "knn":
         # Distance-based, so it is only sane downstream of a scaler. In this
         # pipeline it sits BEFORE scaling, which means the largest-magnitude
         # column dominates the neighbour search. That is a real caveat and the
         # reason `knn` is not the default; see the note in the class docstring
         # of tests/test_numeric.py::test_knn_imputer_is_scale_sensitive.
-        return KNNImputer(n_neighbors=5, weights="distance")
+        return _pandas(KNNImputer(n_neighbors=5, weights="distance"))
     if kind == "iterative":
-        return IterativeImputer(random_state=seed, max_iter=10, sample_posterior=False)
+        return _pandas(
+            IterativeImputer(random_state=seed, max_iter=10, sample_posterior=False)
+        )
     raise ValueError(f"Unknown imputer {kind!r}; expected one of {IMPUTERS}")
 
 
@@ -160,23 +185,23 @@ def make_deskew(kind: str = "none") -> BaseEstimator | str:
     if kind == "none":
         return "passthrough"
     if kind == "log":
-        return _log1p_transformer()
+        return _pandas(_log1p_transformer())
     if kind == "yeo-johnson":
         # Yeo-Johnson rather than Box-Cox: Box-Cox requires strictly positive
         # input, and nothing here guarantees that for a column the caller might
         # route through later.
-        return PowerTransformer(method="yeo-johnson", standardize=False)
+        return _pandas(PowerTransformer(method="yeo-johnson", standardize=False))
     raise ValueError(f"Unknown deskew {kind!r}; expected one of {DESKEWERS}")
 
 
 def make_scaler(kind: str = "standard") -> BaseEstimator | str:
     """Return the named scaler, or ``"passthrough"``."""
     if kind == "standard":
-        return StandardScaler()
+        return _pandas(StandardScaler())
     if kind == "robust":
-        return RobustScaler()
+        return _pandas(RobustScaler())
     if kind == "minmax":
-        return MinMaxScaler()
+        return _pandas(MinMaxScaler())
     if kind == "none":
         return "passthrough"
     raise ValueError(f"Unknown scaler {kind!r}; expected one of {SCALERS}")

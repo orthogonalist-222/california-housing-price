@@ -43,6 +43,10 @@ Roles in this project: `data scientist`, `ML engineer`, `tech lead`,
 | 2026-09-20 | M3-S1 | Layout gate | data scientist | data scientist | PASS | `layout gate OK: 46 tracked files, all declared.` |
 | 2026-09-20 | M3-S1 | Baselines cross-validated | data scientist | data scientist | PASS | dummy 118,322 / linear 63,094 / ridge 63,089 - see RT-014 |
 | 2026-09-20 | M3-S1 | ADR-003 freezes the one-shot run **before** it happens | data scientist | data scientist | PASS | Five arms named, segment table required, unfalsifiable list written |
+| 2026-09-20 | M3-S2 | `uv run pytest -q` | data scientist | data scientist | PASS | 192 passed |
+| 2026-09-20 | M3-S2 | Layout gate | data scientist | data scientist | PASS | `layout gate OK: 49 tracked files, all declared.` |
+| 2026-09-20 | M3-S2 | Ensembles beat the linear baseline | data scientist | data scientist | PASS | hgb 43,860 / rf 43,352 vs ridge 63,089 - see RT-015 |
+| 2026-09-20 | M3-S2 | Search reaches preprocessing, not just the model | data scientist | data scientist | PASS | 5 of 10 winning params are `preprocess__*` - RT-015 |
 
 ## Red-team records
 
@@ -394,3 +398,89 @@ each first value. The imputer entries are OBJECTS rather than strings for a
 related reason: a search sets pipeline steps, so `"median"` would be rejected
 while `"passthrough"` would be quietly accepted and let the 207 nulls reach an
 estimator that cannot take them.
+
+### RT-015 - tuned ensembles, and the search that reaches the preprocessing (2026-09-20)
+
+Five-fold CV on the TRAINING split, seed 42. The test set remains untouched.
+
+| model | CV RMSE | fold std | train RMSE | fit time | draws |
+| --- | --- | --- | --- | --- | --- |
+| ridge (M3-S1) | 63,089 | +/-1,993 | 62,875 | 0.1s | - |
+| hgb | **43,860** | +/-1,712 | 21,592 | 5.2s | 25 |
+| rf | **43,352** | +/-1,236 | 16,108 | 24.0s | 20 |
+
+Both beat the linear baseline by ~31%. RF edges HGB by 508 RMSE, which is
+INSIDE the fold spread - "RF is better" is not a claim this evidence supports -
+while costing 4.6x the fit time.
+
+Reversal from M3-S1 worth recording: the linear models underfit (train and test
+within 0.3%); the ensembles overfit (RF's train RMSE is 2.7x better than its
+CV). Both columns are reported in every leaderboard for exactly this reason.
+
+**The claim under test - the search is joint.** HGB's winning draw:
+
+```
+model__l2_regularization        = 1.0
+model__learning_rate            = 0.05
+model__max_iter                 = 400
+model__max_leaf_nodes           = 127
+model__min_samples_leaf         = 5
+preprocess__binned__bin__n_bins = 8
+preprocess__geo__gamma          = 0.1
+preprocess__geo__n_clusters     = 20
+preprocess__heavy__deskew       = PowerTransformer
+preprocess__heavy__impute       = SimpleImputer
+```
+
+**Five of ten winning parameters are preprocessing decisions**, chosen by the
+same cross-validated evidence that chose the learning rate. A hand-rolled
+fit_transform chain cannot do this: by the time the model is tuned the
+preprocessing is already baked into the matrix.
+
+**Noted for M3-S3:** both models converged on `n_clusters=20` and `n_bins=8`,
+the top of both ranges. The ranges are too narrow; widen rather than rediscover.
+
+**ADR-001's obligation paying off.** HGB, training-split segments:
+
+```
+               rmse      mae    r2      n
+uncensored  19422.8  13256.9   1.0  15746
+censored    33051.9  16918.8  -0.2    766
+```
+
+R2 of -0.2 on the censored rows - worse than predicting their mean, exactly as
+ADR-001 anticipated. A headline number would have averaged that away.
+
+### RT-016 - F-006: a test that passed while the search was entirely broken
+
+**Not planted.** The first search run raised on every draw:
+
+```
+ValueError: Concatenating DataFrames from the transformer's output lead to an
+inconsistent number of samples. The output may have Pandas Indexes that do not
+match...
+```
+
+from inside `ColumnTransformer`, naming neither the branch nor the step.
+
+**Cause.** `build_numeric_block` calls `set_output` on the Pipeline, configuring
+the steps present AT THAT MOMENT. A search replacing a step installs an
+estimator nobody configured; it returns a bare ndarray and the branch loses its
+index.
+
+**Why the existing test missed it, twice over:**
+
+1. It fitted only `values[0]`, so two of three imputers were never tried.
+2. It fitted on `X.iloc[:200]` - a `RangeIndex` 0..199. A bare ndarray is
+   re-framed with a DEFAULT `RangeIndex`, so the broken output **aligned by
+   accident**. On a real stratified split the same code raised.
+
+**Fixed** by `numeric._pandas`, which configures every factory output at
+construction. The test now fits EVERY value on a SHUFFLED index and asserts up
+front that the index is not a `RangeIndex` - that assertion is the point of the
+test. `test_a_factory_result_is_safe_to_drop_into_a_pipeline` pins the root
+cause at its source.
+
+Related hardening: `run_search` sets `error_score="raise"`. The default is
+`np.nan`, which turns a broken configuration into a merely unlucky one and lets
+a search report a winner while silently discarding half its budget.

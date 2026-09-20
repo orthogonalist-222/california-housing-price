@@ -210,18 +210,62 @@ def test_search_space_paths_all_resolve() -> None:
     assert not unknown, f"search-space keys that name nothing: {unknown}"
 
 
-def test_every_search_space_value_is_settable(housing: pd.DataFrame) -> None:
-    """The paths resolving is not enough — the values have to be accepted."""
+def test_every_search_space_value_fits(housing: pd.DataFrame) -> None:
+    """EVERY value, on a NON-TRIVIAL INDEX. Both halves of that were defects.
+
+    The earlier version of this test fitted only ``values[0]`` on
+    ``X.iloc[:200]``, and passed while the search was broken (F-006).
+
+    - Only the first value: two of the three imputers were never tried.
+    - ``.iloc[:200]``: that slice has a ``RangeIndex`` 0..199. A step replaced
+      by a search returns a bare ndarray, which scikit-learn re-frames with a
+      default ``RangeIndex`` — so on that slice the broken output **aligned by
+      accident**. On a real stratified split, whose index is not 0..n-1, the
+      same code raised from inside ``ColumnTransformer``.
+
+    A test that samples its rows would have caught this; a test that takes the
+    head of the frame cannot.
+    """
     from sklearn.base import clone
     from sklearn.linear_model import Ridge
 
     from calhousing.preprocess.assemble import build_pipeline
 
-    X, y = housing.drop(columns=[config.TARGET]), housing[config.TARGET]
+    shuffled = housing.sample(frac=1.0, random_state=1).iloc[:250]
+    assert not shuffled.index.equals(pd.RangeIndex(len(shuffled))), (
+        "this test is worthless on a RangeIndex - that is the whole point"
+    )
+    X, y = shuffled.drop(columns=[config.TARGET]), shuffled[config.TARGET]
+
     for key, values in PREPROCESS_SEARCH_SPACE.items():
-        pipeline = build_pipeline(Ridge())
-        pipeline.set_params(**{key: clone(values[0], safe=False)})
-        pipeline.fit(X.iloc[:200], y.iloc[:200])
+        for value in values:
+            pipeline = build_pipeline(Ridge())
+            pipeline.set_params(**{key: clone(value, safe=False)})
+            pipeline.fit(X, y)
+
+
+def test_a_factory_result_is_safe_to_drop_into_a_pipeline() -> None:
+    """The root cause of F-006, pinned at its source.
+
+    ``build_numeric_block`` calls ``set_output`` on the Pipeline, which
+    configures the steps that exist at that moment. A step installed later by a
+    search was never configured. So every factory must return an object that is
+    already configured to emit pandas.
+    """
+    from calhousing.preprocess.numeric import make_deskew, make_imputer, make_scaler
+
+    for factory, names in (
+        (make_imputer, ("median", "mean", "knn", "iterative")),
+        (make_deskew, ("log", "yeo-johnson")),
+        (make_scaler, ("standard", "robust", "minmax")),
+    ):
+        for name in names:
+            built = factory(name)
+            config_ = getattr(built, "_sklearn_output_config", {})
+            assert config_.get("transform") == "pandas", (
+                f"{factory.__name__}({name!r}) does not emit pandas; a search "
+                "installing it would silently drop the index"
+            )
 
 
 def test_registry_entries_explain_themselves() -> None:

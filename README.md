@@ -13,8 +13,9 @@ the defects that give a pipeline something to do:
 | `ocean_proximity == "ISLAND"` | 5 rows | an unseen-category trap in any naive split |
 | `median_house_value` censored at `$500,001` | ~965 rows | an honest error story, reported by segment |
 
-> Status: **M1-S1 complete** — scaffold, CI and layout gate. The pipeline itself
-> lands in M2. This README is rewritten at M4-S3 with the headline numbers.
+> Status: **M1-S2 complete** — scaffold, layout gate, schema contract and a
+> leakage-safe split. The pipeline itself lands in M2. This README is rewritten
+> at M4-S3 with the headline numbers.
 
 ## Quick start
 
@@ -73,6 +74,7 @@ california-housing-price/
 │   ├── train.py                                    M3-S2
 │   └── interpret.py                                M3-S4
 ├── tests/                                          alongside each module
+│   └── conftest.py  (synthetic fixtures)          M1-S2
 ├── tools/
 │   ├── check_layout.py                             M1-S1
 │   ├── build_notebook.py                           M4-S1

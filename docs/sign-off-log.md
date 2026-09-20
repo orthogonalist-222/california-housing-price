@@ -14,6 +14,10 @@ Roles in this project: `data scientist`, `ML engineer`, `tech lead`,
 | 2026-09-20 | M1-S1 | Layout gate, control | tech lead | tech lead | PASS | `layout gate OK: 14 tracked files, all declared.` (exit 0) |
 | 2026-09-20 | M1-S1 | Layout gate, **red-team** | tech lead | tech lead | PASS | See RT-001 below |
 | 2026-09-20 | M1-S1 | Story-lint, **red-team** | tech lead | tech lead | PASS | See RT-002 below |
+| 2026-09-20 | M1-S2 | `uv run pytest -q` | data scientist | data scientist | PASS | 35 passed (3 real-file tests ran locally; they skip on CI) |
+| 2026-09-20 | M1-S2 | Layout gate | data scientist | data scientist | PASS | `layout gate OK: 22 tracked files, all declared.` |
+| 2026-09-20 | M1-S2 | Schema contract, **red-team** | data scientist | data scientist | PASS | See RT-003 below |
+| 2026-09-20 | M1-S2 | Split coverage invariant | data scientist | data scientist | PASS | See RT-004 below |
 
 ## Red-team records
 
@@ -57,3 +61,47 @@ The CI job's shell logic run locally against four inputs:
 The first row is the failure this gate exists for: the sibling program's
 `docs/m3-kickoff`-style PRs are precisely what the protocol calls "a unit that
 has left the map".
+
+### RT-003 — the schema contract refuses, with three different messages (2026-09-20)
+
+Three defects planted into a synthetic frame; the observed refusals:
+
+```
+missing column: MissingColumnsError: Missing required column(s): ['median_income']. Expected [...]
+wrong dtype:    ColumnTypeError: Column(s) with the wrong dtype: total_rooms (got object, expected numeric)
+out of range:   ValueRangeError: Value(s) outside the expected range: latitude: 1 row(s) outside [32.0, 43.0] (observed 45.6 .. 45.6)
+```
+
+Three classes, three cures, one shared base (`SchemaError`) so a caller can use
+one `except`. Pinned by `tests/test_data.py::test_the_three_refusals_are_distinguishable`
+and `::test_checks_run_most_fundamental_first`.
+
+A fourth refusal is deliberately **not** a `SchemaError`: `DataNotFoundError`
+for a missing file. An absent file and a malformed one have nothing in common
+except that both stop the run.
+
+### RT-004 — the split's rare-category guarantee (2026-09-20)
+
+**Planted defect: the design the plan asked for.** Stratifying on income band
+alone, measured on the real file:
+
+| seed | ISLAND train | ISLAND test |
+| --- | --- | --- |
+| 0 | 4 | 1 |
+| 42 | **2** | 3 |
+| 7 | **5** | **0** |
+| 2024 | 3 | 2 |
+
+Seed 7 leaves the test set with no island. The acceptance criterion ("ISLAND
+appears in train") passed at seed 42 **by luck**.
+
+**Second rejected design:** stratify on `income_band x ocean_proximity` —
+scikit-learn raises `The least populated class in y has only 1 member`, because
+`band 3 x ISLAND` has exactly one row.
+
+**Shipped design:** collapse per level. Observed on the real file, seeds
+0 / 42 / 7 / 2024 — `ISLAND train=4 test=1` in **all four**. Both rejected
+designs are held in place by tests
+(`test_naive_band_stratification_is_the_lottery_this_replaces`,
+`test_composite_key_without_collapse_is_unsplittable`) so that a future
+simplification has to confront them.

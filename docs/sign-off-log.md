@@ -51,6 +51,11 @@ Roles in this project: `data scientist`, `ML engineer`, `tech lead`,
 | 2026-09-20 | M3-S3 | Layout gate | data scientist | data scientist | PASS | 52 tracked files, all declared |
 | 2026-09-20 | M3-S3 | xgb and lgbm fit inside the pipeline | data scientist | data scientist | PASS | See RT-017 (feature-name interop) |
 | 2026-09-20 | M3-S3 | Fair four-arm comparison | data scientist | data scientist | **PASS, with a negative result** | See RT-018 |
+| 2026-09-20 | M3-S4 | `uv run pytest -q` | data scientist | data scientist | PASS | 240 passed |
+| 2026-09-20 | M3-S4 | Layout gate | data scientist | data scientist | PASS | `layout gate OK: 55 tracked files, all declared.` |
+| 2026-09-20 | M3-S4 | **The one-shot test-set run** | data scientist | data scientist | **PASS** | Five arms, one invocation, seed 42 - see RT-019. Record: `artifacts/final/test-set-evaluation.json` |
+| 2026-09-20 | M3-S4 | One-shot guard, **red-team** | data scientist | data scientist | PASS | Second run refused with exit 2, record unchanged; `--rerun` still works |
+| 2026-09-20 | **M3** | **Milestone gate** | data scientist | data scientist | **PASS** | All four stories observed; F-001..F-006 closed, no open S1/S2. Release `v0.3.0`. |
 
 ## Red-team records
 
@@ -551,3 +556,73 @@ zero-width bins for `housing_median_age` (52 distinct values, 1,273 rows piled
 on 52). Benign - the effective bin count is data-dependent - but not suppressed,
 because the honest reading is that `n_bins` above ~12 is a request the data
 cannot always satisfy, and a silenced warning is a fact nobody rediscovers.
+
+### RT-019 - the single test-set evaluation (2026-09-20)
+
+**Run once.** Seed 42, 16,512 train / 4,128 test, five arms in one invocation,
+exactly the list ADR-003 fixed before any of them existed. Record committed at
+`artifacts/final/test-set-evaluation.json` (regenerable, gitignored; the
+numbers below are the evidence).
+
+| arm | test RMSE | MAE | R2 | fit+score |
+| --- | --- | --- | --- | --- |
+| **lgbm** | **42,251** | 26,677 | 0.90 | 4.4s |
+| stack | 42,623 | 26,815 | 0.90 | 52.0s |
+| rf | 43,177 | 27,113 | 0.89 | 42.0s |
+| ridge | 65,142 | 45,540 | 0.68 | 0.1s |
+| dummy | 119,750 | 89,324 | -0.06 | 0.2s |
+
+**The verdict on stacking: it did not earn its complexity.** The stack scored
+42,623 - WORSE than its own best member, at 12x the fit time. Four learners
+that agree within their own fold noise (RT-018) give a meta-learner nothing to
+arbitrate. It is the best arm INLAND (30,186 vs 30,783), which is genuine,
+small, and not enough to change the recommendation - but it is exactly the kind
+of detail a headline erases, which is why the segment table is mandatory.
+
+**The CV protocol held.** CV RMSE 42,166 -> test RMSE 42,251, a gap of 0.2%.
+The winner of a 25-draw joint search generalised almost exactly as its
+cross-validation said it would - checkable only because the test set was
+untouched until this run.
+
+**ADR-001 vindicated with numbers.** LightGBM by segment:
+
+```
+               rmse      mae    r2     n
+uncensored  38939.4  25299.9   0.8  3925
+censored    83570.0  53299.8  -5.1   203
+```
+
+Censored rows are 2.1x worse with R2 = -5.1 - worse than predicting their own
+mean, and necessarily so. The dummy's censored R2 is -87.8. Averaging 5% of the
+test set into one headline would have hidden the whole story.
+
+**Interpretation, computed on a TRAINING slice** (ADR-003 spends the test set
+on scores; an importance plot from it would be a second look):
+
+```
+         longitude   62,919      total_rooms   48,027
+     median_income   59,250       population   38,986
+          latitude   55,028       households   37,361
+   ocean_proximity   31,328   total_bedrooms   17,832
+                             housing_median_age  15,781
+```
+
+Geography outranks income. That the RAW coordinates rank so high AFTER twenty
+cluster-similarity columns were engineered from them says those columns did not
+exhaust the spatial signal. Partial dependence: `median_income` drives price
+monotonically from ~175,000 to ~318,000; `housing_median_age` is FLAT, and last
+in the ranking.
+
+**The one-shot guard, both halves.** A second invocation was refused:
+
+```
+REFUSING: artifacts/final/test-set-evaluation.json already records a run at ...
+The test set is a one-shot check (ADR-003). A second run that replaces the
+first is indistinguishable from tuning on it.
+```
+
+exit code 2, and `test_a_second_run_is_refused` additionally asserts the
+original record is UNCHANGED afterwards - a guard that refuses and then
+corrupts what it protects is not a guard. `--rerun` exists deliberately: a
+guard with no escape hatch gets worked around by deleting the file, which
+leaves no trace, whereas `--rerun` is explicit and greppable.

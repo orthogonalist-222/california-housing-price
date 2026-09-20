@@ -19,7 +19,8 @@ import pandas as pd
 from sklearn.base import BaseEstimator, clone
 from sklearn.dummy import DummyRegressor
 from sklearn.ensemble import HistGradientBoostingRegressor, RandomForestRegressor
-from sklearn.linear_model import LinearRegression, Ridge
+from sklearn.ensemble import StackingRegressor
+from sklearn.linear_model import LinearRegression, Ridge, RidgeCV
 from lightgbm import LGBMRegressor
 from sklearn.model_selection import KFold, cross_validate
 from xgboost import XGBRegressor
@@ -30,6 +31,8 @@ from .preprocess.numeric import make_deskew, make_imputer
 
 __all__ = [
     "ModelSpec",
+    "TUNED",
+    "tuned_pipeline",
     "REGISTRY",
     "get_model",
     "build_cv",
@@ -108,6 +111,122 @@ def _lightgbm() -> BaseEstimator:
         # LightGBM prints a per-fit banner otherwise; across 25 draws x 5 folds
         # that is 125 banners burying the only line anybody reads.
         verbosity=-1,
+    )
+
+
+#: The winning configurations from the M3-S2 and M3-S3 searches.
+#:
+#: Recorded in CODE, not read from ``artifacts/search/*.joblib``. Artifacts are
+#: cattle - the directory is gitignored and may be empty on any checkout - so a
+#: stack that loaded them would be a recipe that cannot rebuild itself. These
+#: numbers are transcribed from the search records committed in each story's PR.
+#:
+#: Each entry separates the estimator's own parameters from the preprocessing
+#: the search chose for it, because the two are set through different doors.
+TUNED: dict[str, dict[str, Any]] = {
+    "ridge": {
+        "model": {"alpha": 10.0},
+        "preprocess": {},
+    },
+    "rf": {  # CV RMSE 42,707 - M3-S3 re-run
+        "model": {
+            "n_estimators": 200,
+            "max_depth": None,
+            "min_samples_leaf": 1,
+            "max_features": 0.3,
+        },
+        "preprocess": {"n_clusters": 45, "gamma": 3.0, "n_bins": 8, "deskew": "none"},
+    },
+    "hgb": {  # CV RMSE 43,571
+        "model": {
+            "learning_rate": 0.05,
+            "max_iter": 600,
+            "max_leaf_nodes": 127,
+            "min_samples_leaf": 20,
+            "l2_regularization": 1.0,
+        },
+        "preprocess": {"n_clusters": 30, "gamma": 0.1, "n_bins": 5, "deskew": "log"},
+    },
+    "xgb": {  # CV RMSE 42,401
+        "model": {
+            "n_estimators": 600,
+            "learning_rate": 0.05,
+            "max_depth": 8,
+            "subsample": 0.85,
+            "colsample_bytree": 0.8,
+            "reg_lambda": 1.0,
+            "min_child_weight": 5,
+        },
+        "preprocess": {
+            "n_clusters": 30,
+            "gamma": 1.0,
+            "n_bins": 3,
+            "deskew": "yeo-johnson",
+        },
+    },
+    "lgbm": {  # CV RMSE 42,166 - the best score AND the cheapest artefact
+        "model": {
+            "n_estimators": 600,
+            "learning_rate": 0.05,
+            "num_leaves": 127,
+            "min_child_samples": 20,
+            "subsample": 0.85,
+            "subsample_freq": 1,
+            "colsample_bytree": 0.8,
+            "reg_lambda": 1.0,
+        },
+        "preprocess": {
+            "n_clusters": 20,
+            "gamma": 0.3,
+            "n_bins": 12,
+            "deskew": "yeo-johnson",
+        },
+    },
+}
+
+#: Base learners for the stack, and the one preprocessing they share.
+#:
+#: ``rf`` is deliberately absent: 289 MB and 115 s per fit for a score
+#: statistically indistinguishable from LightGBM's 6.8 MB and 5.1 s (RT-018).
+#: Inside a stack that cost is multiplied by the internal CV.
+#:
+#: The three tree learners have genuinely different inductive biases -
+#: level-wise (xgb), histogram (hgb), leaf-wise (lgbm) - plus a linear arm, so
+#: the meta-learner has real disagreement to arbitrate rather than four copies
+#: of one opinion.
+STACK_MEMBERS = ("lgbm", "xgb", "hgb", "ridge")
+
+#: The stack shares ONE preprocessing configuration - LightGBM's winner - rather
+#: than nesting each arm's own. Nesting would mean six full preprocessing fits
+#: per stack fit, and the arms disagreed about preprocessing by less than their
+#: fold noise anyway (RT-018). Stated because it is a real simplification, not
+#: a detail: the base learners are NOT exactly the models that were tuned.
+STACK_PREPROCESS = TUNED["lgbm"]["preprocess"]
+
+
+def tuned_estimator(name: str) -> BaseEstimator:
+    """The registry's estimator, configured with its recorded winning params."""
+    estimator = get_model(name).factory()
+    params = TUNED.get(name, {}).get("model", {})
+    if params:
+        estimator.set_params(**params)
+    return estimator
+
+
+def tuned_pipeline(name: str):
+    """A full pipeline at the configuration its search actually chose."""
+    return build_pipeline(tuned_estimator(name), **TUNED.get(name, {}).get("preprocess", {}))
+
+
+def _stack() -> BaseEstimator:
+    return StackingRegressor(
+        estimators=[(name, tuned_estimator(name)) for name in STACK_MEMBERS],
+        # RidgeCV rather than a plain average: the meta-learner has to be able
+        # to say that one base learner adds nothing, and a fixed average cannot.
+        final_estimator=RidgeCV(alphas=(0.1, 1.0, 10.0, 100.0)),
+        cv=build_cv(5),
+        passthrough=False,
+        n_jobs=1,
     )
 
 
@@ -214,6 +333,16 @@ REGISTRY: dict[str, ModelSpec] = {
             "model__reg_lambda": [0.0, 1.0, 5.0],
         },
         cost="medium",
+    ),
+    "stack": ModelSpec(
+        name="stack",
+        factory=_stack,
+        why=(
+            "Four base learners with genuinely different inductive biases, "
+            "arbitrated by a RidgeCV meta-learner. The arm that answers whether "
+            "combining them buys anything over the best single model."
+        ),
+        cost="slow",
     ),
 }
 

@@ -1,115 +1,158 @@
 # California Housing Price — a scikit-learn preprocessing pipeline
 
-Predicting `median_house_value` on the 1990 California census extract
-([`camnugent/california-housing-prices`](https://www.kaggle.com/datasets/camnugent/california-housing-prices)),
-where the **preprocessing pipeline is the deliverable** and the model is its passenger.
+**The preprocessing is the deliverable. The model is its passenger.**
 
-This dataset was chosen over scikit-learn's built-in copy because it still has
-the defects that give a pipeline something to do:
+A Spark ML pipeline rebuilt in scikit-learn — `StringIndexer` → `OneHotEncoder`
+→ `VectorAssembler` → `Pipeline` → `CrossValidator` — on the 1990 California
+census extract ([`camnugent/california-housing-prices`](https://www.kaggle.com/datasets/camnugent/california-housing-prices)).
+
+Every design choice here was **measured before it was made**, and several of the
+measurements contradicted the plan they came from. Those are kept.
+
+| | |
+| --- | --- |
+| **Test RMSE** | **42,251** (CV said 42,166 — a 0.2% gap) |
+| Test MAE / R² | 26,677 / 0.90 |
+| Model | LightGBM, tuned jointly with the preprocessing |
+| Artefact | 6.8 MB, 4.4 s to fit |
+| Tests | 269, on Python 3.11 and 3.12 |
+| Test set scored | **once** ([ADR-003](docs/adr/ADR-003-cv-and-test-protocol.md)) |
+
+Full record: [`docs/evidence/`](docs/evidence/) ·
+Caveats that matter: [`docs/model-card.md`](docs/model-card.md)
+
+## Four things this project found
+
+**1. The classic preprocessing leak is not measurable here.** Fitting the
+preprocessing outside the fold costs **−0.135%** of RMSE — 0.06× the
+fold-to-fold spread, with a sign that flips as the sample changes. The leak
+that *does* bite is a leaked **column** (63,811 → 5,121), and what stops it is
+`remainder="drop"` making the assembler a whitelist.
+
+```bash
+uv run python tools/measure_leakage.py   # read the numbers, not the folklore
+```
+
+**2. No ensemble is better than any other.** RandomForest, HistGradientBoosting,
+XGBoost and LightGBM span 1,405 CV RMSE while their own fold standard
+deviations run ±1,178 to ±1,445. The choice was made on **cost**: 6.8 MB and
+5.1 s against RandomForest's **289 MB** and 115 s.
+
+**3. Stacking did not earn its complexity.** It scored *worse* than its own best
+member, at 12× the fit time.
+
+**4. A model cannot be right about a censored row.** 965 rows sit at the
+`$500,001` cap. On those, the model scores **R² of −5.1** — worse than
+predicting their own mean, and necessarily so. Every evaluation reports the
+segments separately; the headline alone would hide it.
+
+## The dataset's three defects, which are the point
 
 | Defect | Count | What it forces |
 | --- | --- | --- |
-| `total_bedrooms` missing | 207 rows | imputation fitted inside the fold |
-| `ocean_proximity == "ISLAND"` | 5 rows | an unseen-category trap in any naive split |
-| `median_house_value` censored at `$500,001` | ~965 rows | an honest error story, reported by segment |
+| `total_bedrooms` missing | 207 | imputation fitted inside the fold |
+| `ocean_proximity == "ISLAND"` | 5 | an unseen-category trap in any naive split |
+| target censored at both ends | 965 + 4 | an honest error story, reported by segment |
 
-> Status: **M2 complete** (`v0.2.0`) — the preprocessing pipeline is built and
-> assembled: impute, de-skew, encode, bin, engineer, and one `ColumnTransformer`
-> that routes them. Models land in M3. This README is rewritten at M4-S3 with
-> the headline numbers.
->
-> See **[docs/pyspark-to-sklearn.md](docs/pyspark-to-sklearn.md)** for the
-> stage-by-stage translation, and run `uv run python tools/measure_leakage.py`
-> for what leakage actually costs here (less than the folklore claims — and the
-> one that does bite is not the one you are told about).
+Chosen over `sklearn.datasets.fetch_california_housing` precisely because it is
+not clean. A pipeline needs something to do.
 
 ## Quick start
 
 ```bash
 uv sync --dev
 uv run pytest -q
-uv run python tools/check_layout.py
-uv run python -m calhousing.eda        # seven figures -> artifacts/eda/
-uv run python tools/measure_leakage.py # what leakage costs, measured
-uv run python -m calhousing.train --model lgbm --n-iter 25
 ```
-
-Raw data is never tracked; fetch it with:
 
 ```bash
 kaggle datasets download -d camnugent/california-housing-prices -p data/raw --unzip
 ```
 
+```bash
+uv run python -m calhousing.eda           # seven reproducible figures
+uv run python tools/measure_leakage.py    # what leakage actually costs
+uv run python -m calhousing.train --model lgbm --n-iter 25
+```
+
+## PySpark → scikit-learn
+
+| Spark ML | scikit-learn | Where |
+| --- | --- | --- |
+| `Imputer` | `SimpleImputer` / `KNNImputer` / `IterativeImputer` | `preprocess/numeric.py` |
+| `StringIndexer` | `OrdinalEncoder` | `preprocess/categorical.py` |
+| `OneHotEncoder` | `OneHotEncoder` | `preprocess/categorical.py` |
+| `Bucketizer` | `KBinsDiscretizer` | `preprocess/categorical.py` |
+| `StandardScaler` | `StandardScaler` / `RobustScaler` / `MinMaxScaler` | `preprocess/numeric.py` |
+| a UDF | a `TransformerMixin` subclass | `preprocess/features.py` |
+| **`VectorAssembler`** | **`ColumnTransformer`** | `preprocess/assemble.py` |
+| `Pipeline` | `Pipeline` | `preprocess/assemble.py` |
+| `CrossValidator` + `ParamGridBuilder` | `RandomizedSearchCV` over the whole pipeline | `train.py` |
+
+Five places the translation is *not* one-to-one:
+[`docs/pyspark-to-sklearn.md`](docs/pyspark-to-sklearn.md).
+
 ## Declared repo layout
 
-Every path below is tagged with the story that adds it. `tools/check_layout.py`
-holds the same tree in machine-readable form and CI **fails** on a tracked path
-this list does not cover — a new path arrives only through a story that declares
-it first.
+Every path is tagged with the story that adds it. `tools/check_layout.py` holds
+the same tree machine-readably and CI **fails** both on a tracked path this list
+does not cover *and* on a declared path that is not tracked.
 
 ```
 california-housing-price/
-├── .gitattributes                                  M1-S1
-├── .gitignore                                      M1-S1
-├── .python-version                     (3.12)      M1-S1
-├── pyproject.toml                                  M1-S1
-├── uv.lock                                         M1-S1
-├── README.md                                       M1-S1
-├── CLAUDE.md                                       M1-S1
-├── .github/workflows/ci.yml                        M1-S1
+├── .gitattributes .gitignore .python-version        M1-S1
+├── pyproject.toml uv.lock README.md CLAUDE.md       M1-S1
+├── .github/workflows/ci.yml                         M1-S1
 ├── docs/
-│   ├── sign-off-log.md                             M1-S1
-│   ├── findings-register.md                        M1-S1
-│   ├── field-notes/m<M>-s<S>-<slug>.md             one per story
-│   ├── adr/ADR-001-dataset-and-target-censoring.md M1-S2
-│   ├── adr/ADR-002-encoding-strategy.md            M2-S2
-│   ├── adr/ADR-003-cv-and-test-protocol.md         M3-S1
-│   ├── adr/ADR-004-packaging-dual-path.md          M4-S2
-│   ├── pyspark-to-sklearn.md                       M2-S4
-│   └── model-card.md                               M4-S3
+│   ├── sign-off-log.md  findings-register.md        M1-S1
+│   ├── field-notes/m<M>-s<S>-<slug>.md              one per story
+│   ├── adr/ADR-001 … ADR-004                        M1-S2 … M4-S2
+│   ├── pyspark-to-sklearn.md                        M2-S4
+│   ├── model-card.md                                M4-S3
+│   └── evidence/                                    M4-S3  (the one-shot record)
 ├── src/calhousing/
-│   ├── __init__.py                                 M1-S1
-│   ├── py.typed                                    M1-S1
-│   ├── config.py                                   M1-S2
-│   ├── data.py                                     M1-S2
-│   ├── splits.py                                   M1-S2
-│   ├── eda.py                                      M1-S3
-│   ├── preprocess/numeric.py                       M2-S1
-│   ├── preprocess/categorical.py                   M2-S2
-│   ├── preprocess/features.py                      M2-S3
-│   ├── preprocess/assemble.py                      M2-S4
-│   ├── models.py                                   M3-S1
-│   ├── evaluate.py                                 M3-S1
-│   ├── train.py                                    M3-S2
-│   └── interpret.py                                M3-S4
-├── tests/                                          alongside each module
-│   └── conftest.py  (synthetic fixtures)          M1-S2
+│   ├── config.py  data.py  splits.py                M1-S2
+│   ├── eda.py                                       M1-S3
+│   ├── preprocess/numeric.py                        M2-S1
+│   ├── preprocess/categorical.py                    M2-S2
+│   ├── preprocess/features.py                       M2-S3
+│   ├── preprocess/assemble.py                       M2-S4
+│   ├── evaluate.py  models.py                       M3-S1
+│   ├── train.py                                     M3-S2
+│   └── interpret.py                                 M3-S4
+├── tests/                                           alongside each module
 ├── tools/
-│   ├── check_layout.py                             M1-S1
-│   ├── measure_leakage.py                          M2-S4
-│   ├── build_notebook.py                           M4-S1
-│   └── stage_kaggle.py                             M4-S2
+│   ├── check_layout.py                              M1-S1
+│   ├── measure_leakage.py                           M2-S4
+│   ├── final_evaluation.py                          M3-S4
+│   ├── build_notebook.py  run_notebook.py           M4-S1
+│   └── stage_kaggle.py                              M4-S2
 ├── notebooks/california-housing-sklearn-pipeline.ipynb   M4-S1 (generated)
-└── kaggle/
-    ├── kernel/kernel-metadata.json                 M4-S2
-    └── src_dataset/dataset-metadata.json           M4-S2
+└── kaggle/{kernel,src_dataset}/*-metadata.json      M4-S2
 ```
 
 **Never in the repo:** `HANDOFF.md` (session log), `data/` (regenerable),
-`artifacts/` (run outputs), staged Kaggle zips and notebook copies, `.venv/`,
-`.idea/`, and credentials of any kind.
+`artifacts/` (run outputs — except the one-shot record, which is promoted to
+`docs/evidence/` because it *cannot* be regenerated), staged Kaggle zips and
+notebook copies, `.venv/`, `.idea/`, credentials of any kind.
 
-## How the work is organised
+## How the work was organised
 
 One story → one branch `feat/m<M>-s<S>-<slug>` → one PR `M<M>-S<S>: <title>` →
-one merge commit, in plan order, one open at a time.
+one merge commit, in plan order, one open at a time. CI refuses a PR whose
+branch and title disagree.
 
-| Milestone | Delivers |
-| --- | --- |
-| **M1** | Foundation: scaffold, data contract, leakage-safe split, EDA |
-| **M2** | The pipeline: impute → encode → engineer → assemble |
-| **M3** | Models: baselines, tuned ensembles, boosting, stacking, one test run |
-| **M4** | Delivery: generated notebook, Kaggle packaging, independent validation |
+| Milestone | Delivers | Release |
+| --- | --- | --- |
+| **M1** | Scaffold, layout gate, data contract, leakage-safe split, EDA | `v0.1.0` |
+| **M2** | The pipeline: impute → encode → engineer → assemble | `v0.2.0` |
+| **M3** | Baselines, tuned ensembles, boosting, stacking, one test run | `v0.3.0` |
+| **M4** | Generated notebook, Kaggle packaging, validation, publish | `v1.0.0` |
 
-Process is governed by `UNIVERSAL_PROTOCOL.md` v2.18 in `learning` mode; see
+Every story closes with a **field note** ([`docs/field-notes/`](docs/field-notes/))
+saying what was built, why that way, and what to try. Every gate crossing and
+every red-team is in [`docs/sign-off-log.md`](docs/sign-off-log.md); every
+defect in [`docs/findings-register.md`](docs/findings-register.md), including
+the ones in our own tests.
+
+Process governed by `UNIVERSAL_PROTOCOL.md` v2.18 in `learning` mode; see
 `CLAUDE.md`.

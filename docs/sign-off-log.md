@@ -65,6 +65,11 @@ Roles in this project: `data scientist`, `ML engineer`, `tech lead`,
 | 2026-09-20 | M4-S2 | Layout gate | ML engineer | ML engineer | PASS | `layout gate OK: 65 tracked files, all declared.` |
 | 2026-09-20 | M4-S2 | **Both install paths exercised** | ML engineer | ML engineer | PASS | See RT-022 - each installed into a clean venv |
 | 2026-09-20 | M4-S2 | Staging refuses broken wiring, never uploads | ML engineer | ML engineer | PASS | See RT-023 |
+| 2026-09-20 | M4-S3 | `uv run pytest -q` | ML engineer | ML engineer | PASS | 269 passed |
+| 2026-09-20 | M4-S3 | Layout gate (both directions now) | ML engineer | ML engineer | PASS | `layout gate OK: 73 tracked files, all declared and present.` |
+| 2026-09-20 | M4-S3 | **Reproduction from a clean clone** | ML engineer | ML engineer | PASS | Every headline number to the decimal - see RT-024 |
+| 2026-09-20 | M4-S3 | Fixes F-007, F-008, F-009 | ML engineer | ML engineer | PASS | Each red-teamed; F-009 is a process defect of my own |
+| 2026-09-20 | **M4** | **Milestone gate** | ML engineer | ML engineer | **PASS, with one item explicitly not done** | Kernel push to the user's public Kaggle profile is the user's to authorise; everything up to it is verified. Release `v1.0.0`. |
 
 ## Red-team records
 
@@ -761,3 +766,53 @@ publish something nobody meant to.
 
 Both found by writing tests for a script, which is the argument for `tools/`
 being importable at all.
+
+### RT-024 - reproduction from a clean clone (2026-09-20)
+
+A fresh `git clone` of the branch, `uv sync --dev`, the dataset downloaded from
+Kaggle, and nothing else. Reproduced every headline number **to the decimal**:
+
+```
+  dummy  test RMSE   119,750        lgbm 42251.1
+  ridge  test RMSE    65,142        stack 42622.5
+  rf     test RMSE    43,177        rf 43176.6
+  lgbm   test RMSE    42,251        ridge 65141.6
+  stack  test RMSE    42,623        dummy 119749.8
+```
+
+Identical to `docs/evidence/test-set-evaluation.json`.
+
+**Two honest caveats on calling this independent validation:**
+
+1. It is a REPRODUCTION, not a fresh-eyes review. It proves the recipe is
+   complete and the numbers are not an artefact of one working directory. It
+   does not substitute for a reviewer who was not the author - that remains
+   open, and is stated in the milestone close rather than glossed.
+2. It re-scored the test set, which ADR-003 says happens once. Justification:
+   `TUNED` and `ARMS` are frozen in committed code, so a reproduction selects
+   nothing - it either matches or it is a finding. It matched.
+
+**The clean clone also caught a real gap.** `tools/check_layout.py` failed in
+it with `DECLARED BUT NOT TRACKED: docs/model-card.md` - declared in this story
+and not yet written. The new check found a second defect on its first outing.
+
+### Three defects fixed here under "Also fixes" (2026-09-20)
+
+**F-007 (S1).** `uv build` writes a `.gitignore` containing `*` into its output
+directory. Building into `kaggle/src_dataset/` therefore made git ignore that
+tracked folder, and `dataset-metadata.json` was never committed - passing every
+local check and failing CI on a runner that had only what was in the repo. The
+wheel now builds into `artifacts/wheel/` and is copied across.
+
+**F-008 (S1).** The layout gate enforced only *tracked implies declared*, so a
+declared-but-uncommitted path passed silently. That is the gap F-007 walked
+through. `missing()` closes it with its own distinguishable message; red-teamed
+by untracking both metadata files.
+
+**F-009 (S2) - a process defect, mine.** PR #13 was merged while `test (3.11)`
+and `test (3.12)` were FAILING. The wait-loop polled until the checks were
+COMPLETE and then merged without inspecting their CONCLUSION - so "merge only
+when green" was enforced by nothing, and the loop printed the failures
+immediately above the merge. The merge command now asserts every conclusion is
+`SUCCESS` first. Logged at the same severity as a code defect: a process
+failure that produces a broken `main` is not a smaller thing than a bug.

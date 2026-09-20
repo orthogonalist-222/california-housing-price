@@ -120,7 +120,7 @@ md(
 ## Setup
 
 The pipeline lives in a package rather than in this notebook, so it can be
-unit-tested. 240 tests run against it in CI on Python 3.11 and 3.12.
+unit-tested. 269 tests run against it in CI on Python 3.11 and 3.12.
 """
 )
 

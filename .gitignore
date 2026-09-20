@@ -1,0 +1,37 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Session log (UNIVERSAL_PROTOCOL.md section 6). Deliberately untracked: it is a
+# working-memory document, not a deliverable, and its churn would dominate the
+# repo's history.
+HANDOFF.md
+
+# Data and run outputs: regenerable, and Kaggle is the distribution channel.
+#   data/      <- kaggle datasets download -d camnugent/california-housing-prices
+#   artifacts/ <- figures, fitted models, search results
+data/
+artifacts/
+
+# Notebook scratch
+.ipynb_checkpoints/
+
+# Staged copies assembled at publish time.
+kaggle/src_dataset/*.zip
+kaggle/kernel/*.ipynb
+
+# PyCharm
+.idea/
+
+# Credentials - never, in any mode.
+*.pem
+*.key
+kaggle.json
+.env

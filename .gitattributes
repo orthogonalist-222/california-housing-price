@@ -1,0 +1,13 @@
+# Normalise everything to LF, in the repository AND in the working tree.
+#
+# `text=auto` alone would still check files out as CRLF on Windows, and this
+# project's notebook is a BUILD OUTPUT whose staleness gate compares bytes: the
+# generator running here and the generator running on the Linux CI runner have
+# to emit the same file, or CI fails for a reason that has nothing to do with
+# the content. Forcing eol=lf makes the two environments agree.
+* text=auto eol=lf
+
+# Binary, never normalised.
+*.zip   binary
+*.joblib binary
+*.png   binary

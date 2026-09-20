@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  story-lint:
+    # UNIVERSAL_PROTOCOL.md section 7: CI refuses a PR whose branch and title
+    # disagree, or whose id is not in the plan. A convention nobody enforces
+    # drifts within a single milestone.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Branch and title must name the same story
+        env:
+          BRANCH: ${{ github.head_ref }}
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -u
+          if ! printf '%s' "$BRANCH" | grep -Eq '^feat/m[0-9]+-s[0-9]+(\.[0-9]+)?-[a-z0-9-]+$'; then
+            echo "::error::branch '$BRANCH' is not feat/m<M>-s<S>-<slug>"
+            exit 1
+          fi
+          id_from_branch=$(printf '%s' "$BRANCH" | sed -E 's|^feat/(m[0-9]+-s[0-9]+(\.[0-9]+)?)-.*$|\1|' | tr 'a-z' 'A-Z')
+          if ! printf '%s' "$TITLE" | grep -Eq "^${id_from_branch}: .+"; then
+            echo "::error::PR title '$TITLE' does not start with '${id_from_branch}: '"
+            exit 1
+          fi
+          echo "story-lint OK: $id_from_branch"
+
+  layout:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Every tracked path is declared
+        run: python tools/check_layout.py
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 is what Kaggle's notebook image runs; 3.12 is the local
+        # development target. The package has to work under both, so both are
+        # tested rather than assumed.
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --dev --python ${{ matrix.python-version }}
+
+      - name: Run tests
+        run: uv run --python ${{ matrix.python-version }} pytest -q

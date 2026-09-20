@@ -169,11 +169,17 @@ def test_a_kaggle_mount_is_searched_not_hardcoded(tmp_path, monkeypatch, housing
     assert config.resolve_csv() == dataset / config.CSV_NAME
 
 
-def test_a_nested_kaggle_mount_is_found(tmp_path, monkeypatch, housing) -> None:
-    """Some datasets mount the file one directory deeper."""
+def test_a_deeply_nested_kaggle_mount_is_found(tmp_path, monkeypatch, housing) -> None:
+    """Depth is not guessable either.
+
+    The first fix globbed `*/` and `*/*/` and still missed it - the real mount
+    was `/kaggle/input/datasets/...`, deeper than both. Guessing the depth is
+    the same mistake as guessing the slug, one layer up. This plants the file
+    four levels down.
+    """
     monkeypatch.delenv(config.CSV_ENV_VAR, raising=False)
     mount = tmp_path / "input"
-    nested = mount / "a-dataset" / "sub"
+    nested = mount / "datasets" / "someone" / "a-slug" / "versions" / "1"
     nested.mkdir(parents=True)
     housing.to_csv(nested / config.CSV_NAME, index=False)
 
@@ -187,14 +193,23 @@ def test_the_kaggle_failure_says_what_is_mounted(tmp_path, monkeypatch) -> None:
     reader guessing - which is what happened on the published kernel."""
     monkeypatch.delenv(config.CSV_ENV_VAR, raising=False)
     mount = tmp_path / "input"
-    (mount / "something-else").mkdir(parents=True)
+
+    # A CSV that IS there, deep, under a name this project does not want. The
+    # refusal must name it with a full path. Listing only the top level said
+    # `contains: ['datasets']` - true, unhelpful, and it cost a second failed
+    # kernel run.
+    deep = mount / "datasets" / "someone" / "a-slug"
+    deep.mkdir(parents=True)
+    (deep / "other.csv").write_text("a,b" + chr(10) + "1,2" + chr(10))
 
     monkeypatch.setattr(config, "KAGGLE_INPUT", mount)
     monkeypatch.setattr(config, "_CSV_CANDIDATES", [tmp_path / "nowhere.csv"])
     with pytest.raises(config.DataNotFoundError) as exc:
         config.resolve_csv()
+
     message = str(exc.value)
-    assert "something-else" in message, "the refusal must name what IS mounted"
+    assert "other.csv" in message, "the refusal must name the CSVs that ARE there"
+    assert "a-slug" in message, "and with enough path to find it"
     assert "Attach the camnugent" in message
 
 

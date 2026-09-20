@@ -18,6 +18,10 @@ Roles in this project: `data scientist`, `ML engineer`, `tech lead`,
 | 2026-09-20 | M1-S2 | Layout gate | data scientist | data scientist | PASS | `layout gate OK: 22 tracked files, all declared.` |
 | 2026-09-20 | M1-S2 | Schema contract, **red-team** | data scientist | data scientist | PASS | See RT-003 below |
 | 2026-09-20 | M1-S2 | Split coverage invariant | data scientist | data scientist | PASS | See RT-004 below |
+| 2026-09-20 | M1-S3 | `uv run pytest -q` | data scientist | data scientist | PASS | 43 passed |
+| 2026-09-20 | M1-S3 | Layout gate | data scientist | data scientist | PASS | `layout gate OK: 25 tracked files, all declared.` |
+| 2026-09-20 | M1-S3 | Figure determinism | data scientist | data scientist | PASS | See RT-005 below |
+| 2026-09-20 | **M1** | **Milestone gate** | data scientist | data scientist | **PASS** | All three stories' Accept-when observed; findings register has no open S1/S2. Release `v0.1.0`. |
 
 ## Red-team records
 
@@ -105,3 +109,30 @@ designs are held in place by tests
 (`test_naive_band_stratification_is_the_lottery_this_replaces`,
 `test_composite_key_without_collapse_is_unsplittable`) so that a future
 simplification has to confront them.
+
+### RT-005 — figure determinism, and the byte that breaks it (2026-09-20)
+
+**Control.** Two consecutive `uv run python -m calhousing.eda` runs on the real
+file produced identical SHA-256 digests for all seven PNGs:
+
+```
+01-target-censoring.png        sha256:e59ec6e12888
+02-ocean-proximity-rarity.png  sha256:c21910784bfa
+03-geography.png               sha256:d67b13a6b31a
+04-correlations.png            sha256:9fc254286627
+05-missingness.png             sha256:927be47ea31a
+06-heavy-tails.png             sha256:11f3205db81e
+07-income-bands-and-split.png  sha256:9f43516df611
+```
+
+**The planted defect is named rather than merely removed.** matplotlib writes
+its own version string into PNG metadata by default, so an identical figure
+built before and after a dependency upgrade differs in bytes.
+`_save` passes `metadata={"Software": None}`, and
+`test_eda.py::test_matplotlib_version_is_not_baked_into_the_png` asserts the
+string is absent from the output — the guard fails the moment someone deletes
+that argument, which is the only way this defect can return.
+
+**Second control:** `test_figures_survive_a_frame_with_no_rare_level` builds
+every figure from a frame with no `ISLAND` rows, so no figure may assume the
+dataset it was written against.

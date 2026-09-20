@@ -54,6 +54,9 @@ DECLARED: list[tuple[str, str]] = [
     ("tests/conftest.py", "M1-S2"),
     ("tests/test_data.py", "M1-S2"),
     ("tests/test_splits.py", "M1-S2"),
+    # --- M1-S3: exploratory figures ----------------------------------------
+    ("src/calhousing/eda.py", "M1-S3"),
+    ("tests/test_eda.py", "M1-S3"),
 ]
 
 #: Paths that must never be tracked, with the reason the gate gives when it

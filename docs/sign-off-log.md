@@ -34,6 +34,11 @@ Roles in this project: `data scientist`, `ML engineer`, `tech lead`,
 | 2026-09-20 | M2-S3 | Layout gate | data scientist | data scientist | PASS | `layout gate OK: 36 tracked files, all declared.` |
 | 2026-09-20 | M2-S3 | Centroids are train-only | data scientist | data scientist | PASS | See RT-010 below |
 | 2026-09-20 | M2-S3 | Zero-denominator guard | data scientist | data scientist | PASS | See RT-011 below |
+| 2026-09-20 | M2-S4 | `uv run pytest -q` | data scientist | data scientist | PASS | 155 passed |
+| 2026-09-20 | M2-S4 | Layout gate | data scientist | data scientist | PASS | `layout gate OK: 41 tracked files, all declared.` |
+| 2026-09-20 | M2-S4 | Leakage measurement | data scientist | data scientist | **PASS, with a corrected claim** | See RT-012 below |
+| 2026-09-20 | M2-S4 | Institutional-outlier regression | data scientist | data scientist | PASS | See RT-013 below; finding F-004 |
+| 2026-09-20 | **M2** | **Milestone gate** | data scientist | data scientist | **PASS** | All four stories' Accept-when observed; F-001..F-004 closed, no open S1/S2. Release `v0.2.0`. |
 
 ## Red-team records
 
@@ -287,3 +292,70 @@ declared fill rather than `inf`.
 **The other half:** `test_the_unguarded_division_really_does_produce_inf`
 asserts plain division still yields `inf` here. If it ever stopped,
 `safe_divide` would be unnecessary and should be deleted.
+
+### RT-012 - the leakage red-team, and the claim it corrected (2026-09-20)
+
+The approved plan's Accept-when expected that fitting the preprocessing outside
+the fold would produce "a measurably better CV score". **It does not**, and the
+measurement is recorded rather than the expectation:
+
+```
+A. Preprocessing inside the fold vs. fitted once on everything
+   honest  RMSE     63,811  +/- 1,430
+   leaked  RMSE     63,897  +/- 1,631
+   leak                -86  (-0.135% of honest)
+   -> the leak is 0.06x the fold-to-fold spread
+```
+
+The leaky variant is **worse**, well inside the noise, and shrinking the
+training set produces no trend - the sign flips between n=300 and n=1 000.
+
+**The red-team that does bite**, same script, part C:
+
+```
+   clean frame                       RMSE     63,811
+   leaky column, through assembler   RMSE     63,811
+   leaky column, forced past it      RMSE      5,121
+```
+
+`remainder="drop"` silently discarded the target-derived column - the top two
+numbers are the same run. The assembler is a whitelist, and that is the leak
+defence with a large measured payoff.
+
+**Consequence for the tests.** `tests/test_assemble.py` asserts the mechanism -
+whitelist, refit-per-fold, row-independence - and never a score. Numbers live in
+`tools/measure_leakage.py`, which anyone can rerun and argue with. Full write-up
+in `docs/pyspark-to-sklearn.md`.
+
+### RT-013 - an institutional block group blows up a linear model (2026-09-20)
+
+**Not planted. Found by running the assembled pipeline**, which is the whole
+argument for exercising a deliverable as its consumer would - every individual
+block was correct and no unit test would have caught this.
+
+Ridge over a 5 000-row subsample:
+
+```
+per-fold RMSE: [61772, 69583, 63860, 65713, 1805055]
+```
+
+Cause, measured on the raw file: the ratios are unbounded and four rows are
+institutions rather than neighbourhoods.
+
+```
+population_per_household   med 2.818   p99.9 13.6   max 1243.3
+rooms_per_household        med 5.229   p99.9 34.2   max  141.9
+```
+
+The largest is 6 households and 7 460 people. Real data.
+
+**Fix:** `QuantileClipper`, winsorising at bounds learned from the TRAINING rows
+- one more stateful step fitted inside the fold. Clipping beats dropping (those
+block groups exist and have a price) and beats `RobustScaler` (which rescales
+the outlier but leaves it as far away).
+
+**After:** `[61694, 69169, 63222, 65349, 72352]`, and full-data Ridge improved
+from 65 838 to 63 811 with the fold spread down from +/-1 868 to +/-1 430.
+Pinned by `test_an_institutional_block_group_does_not_blow_up_predictions`,
+which asserts predictions stay inside a sane multiple of the target range
+rather than pinning a number. Registered as F-004.

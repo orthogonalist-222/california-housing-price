@@ -67,6 +67,11 @@ DECLARED: list[tuple[str, str]] = [
     # --- M2-S3: engineered features ----------------------------------------
     ("src/calhousing/preprocess/features.py", "M2-S3"),
     ("tests/test_features.py", "M2-S3"),
+    # --- M2-S4: assembly ----------------------------------------------------
+    ("src/calhousing/preprocess/assemble.py", "M2-S4"),
+    ("tests/test_assemble.py", "M2-S4"),
+    ("tools/measure_leakage.py", "M2-S4"),
+    ("docs/pyspark-to-sklearn.md", "M2-S4"),
 ]
 
 #: Paths that must never be tracked, with the reason the gate gives when it

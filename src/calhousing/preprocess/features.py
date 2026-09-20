@@ -38,7 +38,13 @@ from sklearn.utils.validation import check_is_fitted
 
 from .. import config
 
-__all__ = ["RATIO_COLUMNS", "RatioFeatures", "ClusterSimilarity", "safe_divide"]
+__all__ = [
+    "RATIO_COLUMNS",
+    "RatioFeatures",
+    "ClusterSimilarity",
+    "QuantileClipper",
+    "safe_divide",
+]
 
 #: The engineered ratio names, in output order.
 RATIO_COLUMNS = [
@@ -228,6 +234,66 @@ class ClusterSimilarity(BaseEstimator, TransformerMixin):
                 "ColumnTransformer routed the wrong columns here."
             )
         return frame[["latitude", "longitude"]].to_numpy(dtype=float)
+
+    @staticmethod
+    def _as_frame(X) -> pd.DataFrame:
+        return X if isinstance(X, pd.DataFrame) else pd.DataFrame(X)
+
+
+class QuantileClipper(BaseEstimator, TransformerMixin):
+    """Winsorise each column at quantiles learned from the training rows.
+
+    Added in M2-S4, after a measured failure rather than on principle.
+
+    The engineered ratios are **unbounded**, and this dataset contains block
+    groups that are institutions rather than neighbourhoods — one has 6
+    households and 7 460 people, so ``population_per_household`` is 1 243
+    against a median of 2.8. Those rows are real, not errors.
+
+    Standard-scaled, such a row becomes a z-score in the hundreds, and a linear
+    model extrapolating from it produces predictions that are nonsense. Measured
+    on a 5 000-row subsample, one cross-validation fold returned::
+
+        per-fold RMSE: [61772, 69583, 63860, 65713, 1805055]
+
+    A single fold, twenty-eight times worse than its neighbours, from four rows
+    in the whole dataset.
+
+    Clipping is preferable to dropping: these block groups exist and have a
+    price, so removing them would quietly change the population being modelled.
+    It is preferable to a ``RobustScaler`` too — that rescales the outlier but
+    leaves it just as far away.
+
+    The bounds are **learned parameters**, so this is one more step that must be
+    fitted inside the fold. That is the point of it living here rather than in a
+    cleaning script.
+    """
+
+    def __init__(self, lower: float = 0.001, upper: float = 0.999) -> None:
+        self.lower = lower
+        self.upper = upper
+
+    def fit(self, X, y=None):
+        if not 0.0 <= self.lower < self.upper <= 1.0:
+            raise ValueError(
+                f"Need 0 <= lower < upper <= 1; got lower={self.lower}, "
+                f"upper={self.upper}"
+            )
+        frame = self._as_frame(X)
+        self.lower_bounds_ = frame.quantile(self.lower)
+        self.upper_bounds_ = frame.quantile(self.upper)
+        self.feature_names_in_ = np.asarray(frame.columns, dtype=object)
+        self.n_features_in_ = frame.shape[1]
+        return self
+
+    def transform(self, X) -> pd.DataFrame:
+        check_is_fitted(self, "lower_bounds_")
+        frame = self._as_frame(X)
+        return frame.clip(lower=self.lower_bounds_, upper=self.upper_bounds_, axis=1)
+
+    def get_feature_names_out(self, input_features=None) -> np.ndarray:
+        check_is_fitted(self, "feature_names_in_")
+        return np.asarray(self.feature_names_in_, dtype=object)
 
     @staticmethod
     def _as_frame(X) -> pd.DataFrame:

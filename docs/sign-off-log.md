@@ -26,6 +26,10 @@ Roles in this project: `data scientist`, `ML engineer`, `tech lead`,
 | 2026-09-20 | M2-S1 | Layout gate | data scientist | data scientist | PASS | `layout gate OK: 29 tracked files, all declared.` |
 | 2026-09-20 | M2-S1 | log1p domain guard, **red-team** | data scientist | data scientist | PASS | See RT-006 below; finding F-001 |
 | 2026-09-20 | M2-S1 | Leakage invariant on one block | data scientist | data scientist | PASS | See RT-007 below |
+| 2026-09-20 | M2-S2 | `uv run pytest -q` | data scientist | data scientist | PASS | 113 passed |
+| 2026-09-20 | M2-S2 | Layout gate | data scientist | data scientist | PASS | `layout gate OK: 32 tracked files, all declared.` |
+| 2026-09-20 | M2-S2 | Unseen-category handling, **red-team** | data scientist | data scientist | PASS | See RT-008 below |
+| 2026-09-20 | M2-S2 | `drop='first'` collision, **red-team** | data scientist | data scientist | PASS | See RT-009 below |
 
 ## Red-team records
 
@@ -189,3 +193,63 @@ here at the same weight as everything else: a synthetic fixture that lost the
 property it existed to reproduce, and two M1-S2 tests that relied on a lucky
 draw instead of planting what they asserted — the exact era-fact trap those
 tests were written to warn about.
+
+### RT-008 - a fit that never saw the island (2026-09-20)
+
+**Planted defect: scikit-learn's own default.** `handle_unknown="error"` fitted
+on an island-free frame, then handed an `ISLAND` row:
+
+```
+ValueError: Found unknown categories ['ISLAND'] in column 0 during transform
+```
+
+On this dataset that is a pipeline which trains happily and dies at scoring
+time on five rows out of 20 640.
+
+**Control.** Both shipped encoders transform the same row without raising,
+parametrized over `onehot` and `ordinal`, and repeated against the real file's
+actual five island rows (skipped on CI).
+
+**A measurement that changed the design.** `infrequent_if_exist` is a no-op
+without `min_frequency`, and `min_frequency` only creates the infrequent bucket
+when a **training** category falls below the threshold:
+
+| fit data | infrequent column? | unknown row |
+| --- | --- | --- |
+| contains the 4-row island | yes | `[0,0,0,0,1]` sum 1.0 - a presence |
+| island-free | **no** | `[0,0,0,0]` sum 0.0 - an absence |
+
+So the encoder's unknown-handling depends on M1-S2's split guarantee. Pinned by
+`test_the_infrequent_bucket_needs_the_rare_level_at_fit_time`, whose whole job
+is to fail if that guarantee is ever removed.
+
+### RT-009 - `drop='first'` merges unknown into the baseline (2026-09-20)
+
+**Planted defect, run with the guard bypassed:**
+
+```
+drop='first', handle_unknown='ignore'
+dropped reference level = '<1H OCEAN'
+unknown 'ISLAND'    -> [[0.0, 0.0]]
+known   '<1H OCEAN' -> [[0.0, 0.0]]
+IDENTICAL: True
+```
+
+**Refusal observed:**
+
+```
+UnsafeEncoderError: drop='first' with handle_unknown='ignore' encodes an
+unknown category identically to the dropped reference level - the two become
+the same vector and nothing downstream can separate them. Use drop=None ...
+```
+
+**Both halves, plus the sunset condition.**
+`test_drop_is_allowed_when_unknowns_are_impossible` asserts the guard does not
+ban the *safe* use of `drop`, and `test_the_collision_the_guard_prevents_is_real`
+demonstrates the defect directly, with a failure message stating that if
+scikit-learn ever stops collapsing these, the guard has become unnecessary and
+should be deleted.
+
+**Noted asymmetry:** scikit-learn warns about unknown categories **only when
+`drop` is set**. The safe configuration is silent and the unsafe one is loud, so
+warnings cannot be relied on to surface this.

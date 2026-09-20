@@ -61,6 +61,9 @@ DECLARED: list[tuple[str, str]] = [
     ("src/calhousing/preprocess/__init__.py", "M2-S1"),
     ("src/calhousing/preprocess/numeric.py", "M2-S1"),
     ("tests/test_numeric.py", "M2-S1"),
+    # --- M2-S2: the categorical block --------------------------------------
+    ("src/calhousing/preprocess/categorical.py", "M2-S2"),
+    ("tests/test_categorical.py", "M2-S2"),
 ]
 
 #: Paths that must never be tracked, with the reason the gate gives when it

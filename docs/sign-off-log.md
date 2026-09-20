@@ -22,6 +22,10 @@ Roles in this project: `data scientist`, `ML engineer`, `tech lead`,
 | 2026-09-20 | M1-S3 | Layout gate | data scientist | data scientist | PASS | `layout gate OK: 25 tracked files, all declared.` |
 | 2026-09-20 | M1-S3 | Figure determinism | data scientist | data scientist | PASS | See RT-005 below |
 | 2026-09-20 | **M1** | **Milestone gate** | data scientist | data scientist | **PASS** | All three stories' Accept-when observed; findings register has no open S1/S2. Release `v0.1.0`. |
+| 2026-09-20 | M2-S1 | `uv run pytest -q` | data scientist | data scientist | PASS | 87 passed |
+| 2026-09-20 | M2-S1 | Layout gate | data scientist | data scientist | PASS | `layout gate OK: 29 tracked files, all declared.` |
+| 2026-09-20 | M2-S1 | log1p domain guard, **red-team** | data scientist | data scientist | PASS | See RT-006 below; finding F-001 |
+| 2026-09-20 | M2-S1 | Leakage invariant on one block | data scientist | data scientist | PASS | See RT-007 below |
 
 ## Red-team records
 
@@ -136,3 +140,52 @@ that argument, which is the only way this defect can return.
 **Second control:** `test_figures_survive_a_frame_with_no_rare_level` builds
 every figure from a frame with no `ISLAND` rows, so no figure may assume the
 dataset it was written against.
+
+### RT-006 — a transform that returned NaN instead of raising (2026-09-20)
+
+**Not a planted defect — a real one, found by a test.** `deskew="log"` over the
+whole numeric frame produced no error and a frame of NaNs, because `longitude`
+is about −124 and `np.log1p` is undefined at or below −1. The only signal:
+
+```
+RuntimeWarning: invalid value encountered in divide
+  T = new_sum / new_sample_count      (sklearn/utils/extmath.py:1149)
+```
+
+A warning from inside scikit-learn, naming neither the column nor the step.
+
+**Fixed** by `_checked_log1p`, which refuses:
+
+```
+DomainError: log1p is undefined at or below -1, and would return NaN for:
+longitude (min -124). Route these columns through a block with
+deskew='none' or 'yeo-johnson' instead.
+```
+
+**Both halves pinned.** `test_log_on_an_out_of_domain_column_is_refused_by_name`
+asserts the refusal fires and names `longitude`;
+`test_the_guard_does_not_fire_on_valid_input` asserts it does **not** fire on
+the positive count columns — a guard that refuses correct input is worse than
+no guard. A third test pins that NaN is not read as "below −1". Registered as
+F-001.
+
+### RT-007 — leakage as a property of a single block (2026-09-20)
+
+**Control.** Fit the block on train; transform the test frame whole, and
+transform single rows alone. The two agree to 1e-12. A block whose transform
+depended on the other rows being scored would disagree.
+
+**The vacuity check.** That test is only meaningful if the fitted statistics
+*can* move. `test_fitted_statistics_come_from_train_only` fits on train, then on
+train plus wildly different rows, and asserts the imputer's learned fill values
+**differ** — with an explicit failure message saying the first test cannot
+detect leakage if they do not.
+
+### Note on two findings in our own tests (2026-09-20)
+
+F-002 and F-003 are defects in the test suite, not the code, and both were
+exposed by an unrelated fixture change rather than by review. They are logged
+here at the same weight as everything else: a synthetic fixture that lost the
+property it existed to reproduce, and two M1-S2 tests that relied on a lucky
+draw instead of planting what they asserted — the exact era-fact trap those
+tests were written to warn about.

@@ -57,6 +57,10 @@ DECLARED: list[tuple[str, str]] = [
     # --- M1-S3: exploratory figures ----------------------------------------
     ("src/calhousing/eda.py", "M1-S3"),
     ("tests/test_eda.py", "M1-S3"),
+    # --- M2-S1: the numeric block ------------------------------------------
+    ("src/calhousing/preprocess/__init__.py", "M2-S1"),
+    ("src/calhousing/preprocess/numeric.py", "M2-S1"),
+    ("tests/test_numeric.py", "M2-S1"),
 ]
 
 #: Paths that must never be tracked, with the reason the gate gives when it

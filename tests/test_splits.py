@@ -26,6 +26,26 @@ from conftest import make_housing
 SEEDS = [0, 1, 7, 42, 2024]
 
 
+def _frame_with_singleton_island(n: int = 600, seed: int = 3) -> pd.DataFrame:
+    """A frame whose rare level has a composite group of exactly one row.
+
+    Planted, not hoped for. An earlier version of these tests took whatever
+    ``make_housing(seed=3)`` happened to produce and asserted the collapse had
+    fired - so a change to an UNRELATED column in the fixture (switching the
+    count columns from uniform to log-normal, which shifted every later draw)
+    silently turned the test into one that asserted nothing, and it failed.
+
+    The arrangement below is the real file's: four islands in income band 2 and
+    one alone in band 3.
+    """
+    frame = make_housing(n=n, n_island=5, seed=seed)
+    island = frame.index[frame["ocean_proximity"] == "ISLAND"]
+    assert len(island) == 5
+    frame.loc[island[:4], "median_income"] = 2.0
+    frame.loc[island[4], "median_income"] = 3.5
+    return frame
+
+
 def test_split_is_a_partition(housing: pd.DataFrame) -> None:
     train, test = split_train_test(housing)
     assert len(train) + len(test) == len(housing)
@@ -73,7 +93,7 @@ def test_naive_band_stratification_is_the_lottery_this_replaces() -> None:
     deleted. The assertion is on the *existence of a failure*, not on which
     seed fails, so it does not encode a scipy-version-specific draw.
     """
-    frame = make_housing(n=600, n_island=5, seed=3)
+    frame = _frame_with_singleton_island()
     band = income_band(frame)
     failures = 0
     for seed in range(30):
@@ -92,11 +112,9 @@ def test_naive_band_stratification_is_the_lottery_this_replaces() -> None:
 
 def test_composite_key_without_collapse_is_unsplittable() -> None:
     """The other rejected design: sklearn refuses a stratum of one."""
-    frame = make_housing(n=600, n_island=5, seed=3)
+    frame = _frame_with_singleton_island()
     naive = income_band(frame).astype(str) + "|" + frame["ocean_proximity"]
-    counts = naive.value_counts()
-    if counts.min() >= 2:
-        pytest.skip("this synthetic draw happens not to produce a singleton group")
+    assert naive.value_counts().min() == 1, "the singleton must be planted, not hoped for"
     with pytest.raises(ValueError, match="least populated class"):
         train_test_split(frame, test_size=0.2, random_state=0, stratify=naive)
 
@@ -107,7 +125,7 @@ def test_collapse_is_per_level_not_per_group() -> None:
     The key for every row of a collapsed level must be the bare level name —
     that is what pulls the level's rows together into one splittable stratum.
     """
-    frame = make_housing(n=600, n_island=5, seed=3)
+    frame = _frame_with_singleton_island()
     key = stratification_key(frame)
     island_keys = set(key[frame["ocean_proximity"] == "ISLAND"])
     assert island_keys == {"ISLAND"}, island_keys
